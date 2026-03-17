@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VIDHI - Tamil Doom</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #0a0a0a;
+      color: #c8a000;
+      font-family: 'Courier New', monospace;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      user-select: none;
+    }
+
+    #title-screen {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+      background: linear-gradient(180deg, #0a0015 0%, #1a0a2e 30%, #2d0a1e 60%, #0a0015 100%);
+    }
+
+    #title-screen h1 {
+      font-size: 120px;
+      color: #ff3300;
+      text-shadow:
+        0 0 20px #ff3300,
+        0 0 40px #ff0000,
+        0 0 80px #cc0000,
+        0 4px 0 #880000;
+      letter-spacing: 20px;
+      margin-bottom: 10px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { text-shadow: 0 0 20px #ff3300, 0 0 40px #ff0000, 0 0 80px #cc0000, 0 4px 0 #880000; }
+      50% { text-shadow: 0 0 30px #ff5500, 0 0 60px #ff2200, 0 0 100px #ee0000, 0 4px 0 #aa0000; }
+    }
+
+    #title-screen .subtitle {
+      font-size: 22px;
+      color: #c8a000;
+      letter-spacing: 8px;
+      margin-bottom: 40px;
+    }
+
+    #title-screen .tagline {
+      font-size: 14px;
+      color: #886600;
+      margin-bottom: 60px;
+      font-style: italic;
+    }
+
+    .menu-item {
+      font-size: 24px;
+      color: #888;
+      cursor: pointer;
+      padding: 10px 40px;
+      margin: 5px;
+      transition: all 0.2s;
+      border: 1px solid transparent;
+    }
+
+    .menu-item:hover {
+      color: #ffcc00;
+      border-color: #c8a000;
+      background: rgba(200, 160, 0, 0.1);
+    }
+
+    .controls-info {
+      position: absolute;
+      bottom: 30px;
+      font-size: 11px;
+      color: #555;
+      text-align: center;
+      line-height: 1.8;
+    }
+
+    .controls-info span {
+      color: #886600;
+    }
+
+    #game-container {
+      display: none;
+      position: relative;
+    }
+
+    canvas {
+      display: block;
+      image-rendering: pixelated;
+      cursor: none;
+    }
+
+    #loading {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: #0a0a0a;
+      z-index: 20;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #loading.active {
+      display: flex;
+    }
+
+    #loading h2 {
+      color: #c8a000;
+      font-size: 24px;
+      margin-bottom: 20px;
+    }
+
+    .loading-bar {
+      width: 300px;
+      height: 20px;
+      border: 2px solid #c8a000;
+      position: relative;
+    }
+
+    .loading-fill {
+      height: 100%;
+      background: #c8a000;
+      width: 0%;
+      transition: width 0.3s;
+    }
+
+    /* Ornamental borders */
+    .ornament {
+      width: 400px;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #c8a000, transparent);
+      margin: 15px 0;
+    }
+
+    /* Mobile controls overlay */
+    #mobile-controls {
+      display: none;
+      position: fixed;
+      bottom: 70px;
+      left: 0;
+      right: 0;
+      z-index: 5;
+      pointer-events: none;
+    }
+
+    .touch-btn {
+      width: 56px;
+      height: 56px;
+      border: 2px solid rgba(200, 160, 0, 0.4);
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 8px;
+      color: #c8a000;
+      font-size: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: all;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+    }
+
+    .touch-btn:active {
+      background: rgba(200, 160, 0, 0.2);
+    }
+
+    .dpad {
+      position: absolute;
+      left: 20px;
+      bottom: 0;
+      display: grid;
+      grid-template-columns: 56px 56px 56px;
+      grid-template-rows: 56px 56px 56px;
+      gap: 4px;
+    }
+
+    .action-btns {
+      position: absolute;
+      right: 20px;
+      bottom: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: flex-end;
+    }
+
+    .action-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    @media (pointer: coarse) {
+      #mobile-controls { display: block; }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="loading">
+    <h2>VIDHI</h2>
+    <div class="loading-bar">
+      <div class="loading-fill" id="loading-fill"></div>
+    </div>
+  </div>
+
+  <div id="title-screen">
+    <h1>VIDHI</h1>
+    <div class="subtitle">VIDHIYAI ETHIRKOL</div>
+    <div class="ornament"></div>
+    <div class="tagline">"Confront your fate in the temples of the ancient Asuras"</div>
+
+    <div class="menu-item" id="btn-start">THODANGU / START</div>
+    <div class="menu-item" id="btn-controls">KATTUPPAADUGAL / CONTROLS</div>
+
+    <div class="controls-info" id="controls-detail" style="display:none; position:static; margin-top:30px; color:#886600; font-size:13px;">
+      <span>WASD</span> - Move &nbsp; | &nbsp; <span>Mouse</span> - Look<br>
+      <span>Left Click</span> - Fire &nbsp; | &nbsp; <span>1-4</span> - Switch Weapon<br>
+      <span>E</span> - Interact &nbsp; | &nbsp; <span>ESC</span> - Pause<br>
+      <br>
+      <b style="color:#c8a000;">WEAPONS:</b><br>
+      <span>1</span> Trishul (Trident) &nbsp; | &nbsp; <span>2</span> Agni (Fire)<br>
+      <span>3</span> Sudarshana Chakra &nbsp; | &nbsp; <span>4</span> Brahmastra<br>
+      <br>
+      <b style="color:#c8a000;">ENEMIES:</b><br>
+      Asura - Basic demon &nbsp; | &nbsp; Naga - Serpent warrior<br>
+      Rakshasa - Heavy demon &nbsp; | &nbsp; Mahishasura - BOSS
+    </div>
+
+    <div class="controls-info">
+      <span>Arrow Keys / Q,R</span> also work for rotation<br>
+      A Tamil-themed tribute to the classics
+    </div>
+  </div>
+
+  <div id="game-container">
+    <canvas id="game-canvas"></canvas>
+  </div>
+
+  <div id="mobile-controls">
+    <div class="dpad">
+      <div></div>
+      <div class="touch-btn" data-key="KeyW">W</div>
+      <div></div>
+      <div class="touch-btn" data-key="KeyA">A</div>
+      <div></div>
+      <div class="touch-btn" data-key="KeyD">D</div>
+      <div></div>
+      <div class="touch-btn" data-key="KeyS">S</div>
+      <div></div>
+    </div>
+    <div class="action-btns">
+      <div class="action-row">
+        <div class="touch-btn" data-key="ArrowLeft" style="width:48px;height:48px;font-size:16px;">&#8592;</div>
+        <div class="touch-btn" data-action="fire" style="width:72px;height:72px;font-size:14px;background:rgba(200,0,0,0.2);">FIRE</div>
+        <div class="touch-btn" data-key="ArrowRight" style="width:48px;height:48px;font-size:16px;">&#8594;</div>
+      </div>
+      <div class="action-row">
+        <div class="touch-btn" data-key="Digit1" style="width:40px;height:40px;font-size:14px;">1</div>
+        <div class="touch-btn" data-key="Digit2" style="width:40px;height:40px;font-size:14px;">2</div>
+        <div class="touch-btn" data-key="Digit3" style="width:40px;height:40px;font-size:14px;">3</div>
+        <div class="touch-btn" data-key="Digit4" style="width:40px;height:40px;font-size:14px;">4</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { Game } from './src/game.js';
+
+    const titleScreen = document.getElementById('title-screen');
+    const gameContainer = document.getElementById('game-container');
+    const canvas = document.getElementById('game-canvas');
+    const btnStart = document.getElementById('btn-start');
+    const btnControls = document.getElementById('btn-controls');
+    const controlsDetail = document.getElementById('controls-detail');
+
+    // Responsive canvas sizing
+    function resizeCanvas() {
+      const maxW = Math.min(window.innerWidth, 960);
+      const maxH = Math.min(window.innerHeight, 600);
+      const aspect = 16 / 10;
+
+      let w = maxW;
+      let h = w / aspect;
+      if (h > maxH) {
+        h = maxH;
+        w = h * aspect;
+      }
+
+      canvas.width = Math.floor(w);
+      canvas.height = Math.floor(h);
+    }
+
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    let game = null;
+
+    btnControls.addEventListener('click', () => {
+      controlsDetail.style.display = controlsDetail.style.display === 'none' ? 'block' : 'none';
+    });
+
+    btnStart.addEventListener('click', () => {
+      titleScreen.style.display = 'none';
+      gameContainer.style.display = 'block';
+      resizeCanvas();
+
+      game = new Game(canvas);
+      game.start();
+
+      // Auto-lock pointer on start
+      canvas.requestPointerLock();
+    });
+
+    // Mobile touch controls
+    const touchBtns = document.querySelectorAll('.touch-btn');
+    const activeKeys = {};
+
+    function simulateKey(code, down) {
+      const event = new KeyboardEvent(down ? 'keydown' : 'keyup', { code });
+      document.dispatchEvent(event);
+    }
+
+    touchBtns.forEach(btn => {
+      const key = btn.dataset.key;
+      const action = btn.dataset.action;
+
+      const onStart = (e) => {
+        e.preventDefault();
+        if (key) {
+          simulateKey(key, true);
+          activeKeys[key] = true;
+        }
+        if (action === 'fire' && game) {
+          game.shooting = true;
+        }
+      };
+
+      const onEnd = (e) => {
+        e.preventDefault();
+        if (key) {
+          simulateKey(key, false);
+          delete activeKeys[key];
+        }
+        if (action === 'fire' && game) {
+          game.shooting = false;
+        }
+      };
+
+      btn.addEventListener('touchstart', onStart, { passive: false });
+      btn.addEventListener('touchend', onEnd, { passive: false });
+      btn.addEventListener('touchcancel', onEnd, { passive: false });
+    });
+  </script>
+</body>
+</html>
