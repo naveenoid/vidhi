@@ -92,19 +92,23 @@ class RaycastEngine {
     const ctx = this.ctx;
     const w = this.width;
     const h = this.height;
+    const time = gameState.time || 0;
 
-    // Sky gradient (dusk/temple atmosphere)
+    // Dark dungeon ceiling - stone ceiling with faint cracks of dim light
     const skyGrad = ctx.createLinearGradient(0, 0, 0, h / 2);
-    skyGrad.addColorStop(0, '#1a0a2e');
-    skyGrad.addColorStop(0.5, '#3d1a6e');
-    skyGrad.addColorStop(1, '#c2185b');
+    skyGrad.addColorStop(0, '#0a0608');
+    skyGrad.addColorStop(0.4, '#120a0e');
+    skyGrad.addColorStop(0.7, '#1a0e14');
+    skyGrad.addColorStop(1, '#251518');
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, w, h / 2);
 
-    // Floor gradient
+    // Dungeon floor - worn stone slabs
     const floorGrad = ctx.createLinearGradient(0, h / 2, 0, h);
-    floorGrad.addColorStop(0, '#2d1b0e');
-    floorGrad.addColorStop(1, '#1a0f06');
+    floorGrad.addColorStop(0, '#1a1210');
+    floorGrad.addColorStop(0.3, '#15100c');
+    floorGrad.addColorStop(0.7, '#100b08');
+    floorGrad.addColorStop(1, '#0a0705');
     ctx.fillStyle = floorGrad;
     ctx.fillRect(0, h / 2, w, h / 2);
 
@@ -123,22 +127,116 @@ class RaycastEngine {
       const wallHeight = (TILE_SIZE * h) / correctedDist;
       const wallTop = (h - wallHeight) / 2;
 
-      // Wall colors based on texture type
-      const shade = Math.min(1, 3 / (correctedDist / TILE_SIZE));
+      // Distance-based fog and torchlight
+      const tileDist = correctedDist / TILE_SIZE;
+      const baseFog = Math.min(1, 2.5 / tileDist);
+      // Flickering torch effect
+      const torchFlicker = 1 + Math.sin(time * 8 + i * 0.1) * 0.04 + Math.sin(time * 13 + i * 0.07) * 0.03;
+      const shade = Math.min(1, baseFog * torchFlicker);
       const colors = this.getWallColor(ray.texture, ray.isHorizontal, shade, ray.texX);
 
+      // Draw wall column
       ctx.fillStyle = colors.main;
       ctx.fillRect(i, wallTop, 1, wallHeight);
 
-      // Add texture detail lines
-      if (wallHeight > 10) {
+      // Stone block pattern with mortar lines
+      if (wallHeight > 8) {
+        const isDoor = ray.texture === 5;
+        const blockH = isDoor ? wallHeight / 6 : wallHeight / 8;
+        const blockOffset = (Math.floor(ray.texX * 4) % 2 === 0) ? 0 : blockH * 0.5;
+
+        // Mortar/grout lines between blocks
         ctx.fillStyle = colors.detail;
-        // Brick/stone pattern
-        const brickRows = Math.floor(wallHeight / 16);
-        for (let b = 0; b < brickRows; b++) {
-          const by = wallTop + b * (wallHeight / brickRows);
-          ctx.fillRect(i, by, 1, 1);
+        for (let b = 0; b < 10; b++) {
+          const by = wallTop + b * blockH + blockOffset;
+          if (by > wallTop && by < wallTop + wallHeight) {
+            ctx.fillRect(i, by, 1, Math.max(1, wallHeight * 0.008));
+          }
         }
+
+        // Vertical mortar lines (column seams)
+        const vertSeam = ray.texX % 0.25;
+        if (vertSeam < 0.02 || vertSeam > 0.23) {
+          ctx.fillStyle = colors.detail;
+          ctx.fillRect(i, wallTop, 1, wallHeight);
+        }
+
+        // Moss/lichen patches on dark stone (texture 3)
+        if (ray.texture === 3 && wallHeight > 20) {
+          const mossChance = Math.sin(ray.texX * 47.3 + 13.7);
+          if (mossChance > 0.3) {
+            ctx.fillStyle = `rgba(30,${Math.floor(60 * shade)},25,${0.3 * shade})`;
+            ctx.fillRect(i, wallTop + wallHeight * 0.7, 1, wallHeight * 0.2);
+          }
+          // Water stain dripping down
+          const drip = Math.sin(ray.texX * 71.1);
+          if (drip > 0.6) {
+            ctx.fillStyle = `rgba(20,25,30,${0.2 * shade})`;
+            ctx.fillRect(i, wallTop + wallHeight * 0.3, 1, wallHeight * 0.5);
+          }
+        }
+
+        // Carved relief patterns on red/terracotta walls (texture 2)
+        if (ray.texture === 2 && wallHeight > 15) {
+          const carveX = ray.texX * Math.PI * 6;
+          const carveIntensity = (Math.sin(carveX) * 0.5 + 0.5) * 0.15;
+          ctx.fillStyle = `rgba(0,0,0,${carveIntensity * shade})`;
+          ctx.fillRect(i, wallTop + wallHeight * 0.2, 1, wallHeight * 0.6);
+        }
+
+        // Gold walls shimmer (texture 4)
+        if (ray.texture === 4 && wallHeight > 12) {
+          const shimmer = Math.sin(time * 2 + ray.texX * 20) * 0.1 + 0.05;
+          ctx.fillStyle = `rgba(255,220,100,${shimmer * shade})`;
+          ctx.fillRect(i, wallTop, 1, wallHeight);
+        }
+
+        // DOOR GLOW - make doors very visible (texture 5)
+        if (isDoor) {
+          // Warm glowing border on left/right edges
+          const edgeDist = Math.min(ray.texX, 1 - ray.texX);
+          if (edgeDist < 0.08) {
+            const edgeGlow = (1 - edgeDist / 0.08) * 0.7;
+            ctx.fillStyle = `rgba(255,180,60,${edgeGlow * shade})`;
+            ctx.fillRect(i, wallTop, 1, wallHeight);
+          }
+          // Pulsing warm glow on entire door
+          const doorPulse = Math.sin(time * 3) * 0.08 + 0.12;
+          ctx.fillStyle = `rgba(255,160,40,${doorPulse * shade})`;
+          ctx.fillRect(i, wallTop, 1, wallHeight);
+          // Iron band details across door
+          const bandPos = ray.texX;
+          if (wallHeight > 20) {
+            ctx.fillStyle = `rgba(80,70,50,${0.5 * shade})`;
+            // Horizontal bands
+            ctx.fillRect(i, wallTop + wallHeight * 0.15, 1, Math.max(2, wallHeight * 0.02));
+            ctx.fillRect(i, wallTop + wallHeight * 0.5, 1, Math.max(2, wallHeight * 0.02));
+            ctx.fillRect(i, wallTop + wallHeight * 0.85, 1, Math.max(2, wallHeight * 0.02));
+            // Iron studs
+            if (bandPos > 0.1 && bandPos < 0.15 || bandPos > 0.85 && bandPos < 0.9) {
+              ctx.fillStyle = `rgba(180,160,100,${0.4 * shade})`;
+              ctx.fillRect(i, wallTop + wallHeight * 0.14, 1, Math.max(3, wallHeight * 0.035));
+              ctx.fillRect(i, wallTop + wallHeight * 0.49, 1, Math.max(3, wallHeight * 0.035));
+              ctx.fillRect(i, wallTop + wallHeight * 0.84, 1, Math.max(3, wallHeight * 0.035));
+            }
+            // Door ring/handle
+            if (bandPos > 0.44 && bandPos < 0.56) {
+              ctx.fillStyle = `rgba(200,170,80,${0.6 * shade})`;
+              ctx.fillRect(i, wallTop + wallHeight * 0.45, 1, wallHeight * 0.1);
+            }
+          }
+          // Top and bottom glow lines
+          ctx.fillStyle = `rgba(255,200,80,${0.5 * shade})`;
+          ctx.fillRect(i, wallTop, 1, Math.max(2, wallHeight * 0.015));
+          ctx.fillRect(i, wallTop + wallHeight - Math.max(2, wallHeight * 0.015), 1, Math.max(2, wallHeight * 0.015));
+        }
+      }
+
+      // Distance fog overlay
+      if (tileDist > 3) {
+        const fogAlpha = Math.min(0.7, (tileDist - 3) * 0.06);
+        ctx.fillStyle = `rgba(8,5,12,${fogAlpha})`;
+        ctx.fillRect(i, wallTop, 1, wallHeight);
       }
     }
 
@@ -156,47 +254,48 @@ class RaycastEngine {
   }
 
   getWallColor(texture, isHorizontal, shade, texX) {
-    const darkFactor = isHorizontal ? 0.7 : 1;
+    const darkFactor = isHorizontal ? 0.65 : 1;
     const s = shade * darkFactor;
-    // Add subtle texture variation based on texX position
-    const tv = Math.sin(texX * 37.7) * 0.08; // pseudo-random variation per column
+    // Pseudo-random variation per column for natural stone look
+    const tv = Math.sin(texX * 37.7) * 0.12;
+    const tv2 = Math.sin(texX * 73.1) * 0.06;
 
     switch (texture) {
-      case 1: // Temple stone walls - warm sandstone with mortar lines
+      case 1: // Granite fortress walls - weathered grey-brown stone blocks
         return {
-          main: `rgb(${Math.floor((175 + tv * 40) * s)}, ${Math.floor((138 + tv * 30) * s)}, ${Math.floor((95 + tv * 20) * s)})`,
-          detail: `rgb(${Math.floor(110 * s)}, ${Math.floor(85 * s)}, ${Math.floor(55 * s)})`,
-          accent: `rgb(${Math.floor(200 * s)}, ${Math.floor(160 * s)}, ${Math.floor(110 * s)})`
+          main: `rgb(${Math.floor((120 + tv * 40 + tv2 * 20) * s)}, ${Math.floor((105 + tv * 30 + tv2 * 15) * s)}, ${Math.floor((85 + tv * 20) * s)})`,
+          detail: `rgb(${Math.floor(55 * s)}, ${Math.floor(48 * s)}, ${Math.floor(38 * s)})`,
+          accent: `rgb(${Math.floor(140 * s)}, ${Math.floor(120 * s)}, ${Math.floor(95 * s)})`
         };
-      case 2: // Red/terracotta walls (Dravidian temple) - rich red clay with carved details
+      case 2: // Laterite/red stone walls (Dravidian temple) - deep red-brown with carved reliefs
         return {
-          main: `rgb(${Math.floor((195 + tv * 30) * s)}, ${Math.floor((75 + tv * 20) * s)}, ${Math.floor((55 + tv * 15) * s)})`,
-          detail: `rgb(${Math.floor(130 * s)}, ${Math.floor(45 * s)}, ${Math.floor(30 * s)})`,
-          accent: `rgb(${Math.floor(220 * s)}, ${Math.floor(100 * s)}, ${Math.floor(70 * s)})`
+          main: `rgb(${Math.floor((145 + tv * 30) * s)}, ${Math.floor((60 + tv * 15) * s)}, ${Math.floor((45 + tv * 10) * s)})`,
+          detail: `rgb(${Math.floor(70 * s)}, ${Math.floor(28 * s)}, ${Math.floor(20 * s)})`,
+          accent: `rgb(${Math.floor(170 * s)}, ${Math.floor(80 * s)}, ${Math.floor(55 * s)})`
         };
-      case 3: // Dark stone / dungeon - cold, mossy stone blocks
+      case 3: // Dungeon stone - dark, damp, cold blocks with moss and water stains
         return {
-          main: `rgb(${Math.floor((85 + tv * 20) * s)}, ${Math.floor((88 + tv * 25) * s)}, ${Math.floor((95 + tv * 15) * s)})`,
-          detail: `rgb(${Math.floor(50 * s)}, ${Math.floor(55 * s)}, ${Math.floor(60 * s)})`,
-          accent: `rgb(${Math.floor(70 * s)}, ${Math.floor(90 * s)}, ${Math.floor(75 * s)})`
+          main: `rgb(${Math.floor((55 + tv * 18) * s)}, ${Math.floor((58 + tv * 20) * s)}, ${Math.floor((62 + tv * 12) * s)})`,
+          detail: `rgb(${Math.floor(28 * s)}, ${Math.floor(30 * s)}, ${Math.floor(32 * s)})`,
+          accent: `rgb(${Math.floor(45 * s)}, ${Math.floor(55 * s)}, ${Math.floor(48 * s)})`
         };
-      case 4: // Gold/ornate walls - polished gold with engraved patterns
+      case 4: // Gold/ornate shrine walls - temple gold with engravings
         return {
-          main: `rgb(${Math.floor((215 + tv * 25) * s)}, ${Math.floor((178 + tv * 20) * s)}, ${Math.floor((48 + tv * 15) * s)})`,
-          detail: `rgb(${Math.floor(160 * s)}, ${Math.floor(120 * s)}, ${Math.floor(20 * s)})`,
-          accent: `rgb(${Math.floor(245 * s)}, ${Math.floor(210 * s)}, ${Math.floor(80 * s)})`
+          main: `rgb(${Math.floor((180 + tv * 25) * s)}, ${Math.floor((148 + tv * 20) * s)}, ${Math.floor((45 + tv * 15) * s)})`,
+          detail: `rgb(${Math.floor(100 * s)}, ${Math.floor(78 * s)}, ${Math.floor(18 * s)})`,
+          accent: `rgb(${Math.floor(220 * s)}, ${Math.floor(185 * s)}, ${Math.floor(70 * s)})`
         };
-      case 5: // Door - heavy carved wood with metal bands
+      case 5: // Heavy wooden door - dark teak with iron fittings
         return {
-          main: `rgb(${Math.floor((115 + tv * 20) * s)}, ${Math.floor((58 + tv * 15) * s)}, ${Math.floor((28 + tv * 10) * s)})`,
-          detail: `rgb(${Math.floor(70 * s)}, ${Math.floor(35 * s)}, ${Math.floor(15 * s)})`,
-          accent: `rgb(${Math.floor(160 * s)}, ${Math.floor(130 * s)}, ${Math.floor(40 * s)})`
+          main: `rgb(${Math.floor((90 + tv * 20) * s)}, ${Math.floor((52 + tv * 12) * s)}, ${Math.floor((28 + tv * 8) * s)})`,
+          detail: `rgb(${Math.floor(45 * s)}, ${Math.floor(25 * s)}, ${Math.floor(12 * s)})`,
+          accent: `rgb(${Math.floor(140 * s)}, ${Math.floor(110 * s)}, ${Math.floor(40 * s)})`
         };
       default:
         return {
-          main: `rgb(${Math.floor(150 * s)}, ${Math.floor(150 * s)}, ${Math.floor(150 * s)})`,
-          detail: `rgb(${Math.floor(120 * s)}, ${Math.floor(120 * s)}, ${Math.floor(120 * s)})`,
-          accent: `rgb(${Math.floor(170 * s)}, ${Math.floor(170 * s)}, ${Math.floor(170 * s)})`
+          main: `rgb(${Math.floor(90 * s)}, ${Math.floor(85 * s)}, ${Math.floor(80 * s)})`,
+          detail: `rgb(${Math.floor(50 * s)}, ${Math.floor(48 * s)}, ${Math.floor(45 * s)})`,
+          accent: `rgb(${Math.floor(110 * s)}, ${Math.floor(105 * s)}, ${Math.floor(100 * s)})`
         };
     }
   }
@@ -271,423 +370,673 @@ class RaycastEngine {
   }
 
   drawAsuraColumn(ctx, x, top, height, relX, shade, sprite) {
-    // Asura demon - muscular red demon with horns, fangs, and glowing eyes
-    const hurtFlash = sprite.hurt ? 0.6 : 0;
+    // Asura warrior - muscular red demon with horns, curved sword, and digitigrade legs
+    const hf = sprite.hurt ? 0.6 : 0;
     const s = shade;
+    const anim = sprite.walkAnim || 0;
+    const attacking = sprite.attackAnim > 0;
+    const atkPhase = sprite.attackAnim || 0;
 
-    // Legs (two separate legs with gap)
-    if (relX > 0.25 && relX < 0.42) {
-      // Left leg
-      const legTop = top + height * 0.65;
-      const r = Math.floor((140 + hurtFlash * 115) * s);
-      const g = Math.floor(30 * s);
-      const b = Math.floor(25 * s);
-      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
-      ctx.fillRect(x, legTop, 1, height * 0.35);
-      // Knee highlight
-      if (relX > 0.30 && relX < 0.37) {
-        ctx.fillStyle = `rgba(255,100,60,${0.15 * s})`;
-        ctx.fillRect(x, legTop + height * 0.12, 1, height * 0.06);
+    // --- FEET (pointed, clawed) ---
+    const footY = top + height * 0.92;
+    if (relX > 0.24 && relX < 0.34) {
+      ctx.fillStyle = `rgb(${Math.floor(80*s)},${Math.floor(20*s)},${Math.floor(15*s)})`;
+      ctx.fillRect(x, footY, 1, height * 0.08);
+      // Claw tips
+      if (relX < 0.27) {
+        ctx.fillStyle = `rgb(${Math.floor(200*s)},${Math.floor(190*s)},${Math.floor(170*s)})`;
+        ctx.fillRect(x, footY + height * 0.06, 1, height * 0.02);
       }
     }
-    if (relX > 0.58 && relX < 0.75) {
-      // Right leg
-      const legTop = top + height * 0.65;
-      const r = Math.floor((140 + hurtFlash * 115) * s);
-      const g = Math.floor(30 * s);
-      const b = Math.floor(25 * s);
-      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
-      ctx.fillRect(x, legTop, 1, height * 0.35);
+    if (relX > 0.60 && relX < 0.70) {
+      ctx.fillStyle = `rgb(${Math.floor(80*s)},${Math.floor(20*s)},${Math.floor(15*s)})`;
+      ctx.fillRect(x, footY, 1, height * 0.08);
+      if (relX > 0.67) {
+        ctx.fillStyle = `rgb(${Math.floor(200*s)},${Math.floor(190*s)},${Math.floor(170*s)})`;
+        ctx.fillRect(x, footY + height * 0.06, 1, height * 0.02);
+      }
     }
 
-    // Torso (muscular, wider at shoulders tapering to waist)
-    if (relX > (0.5 - 0.18) && relX < (0.5 + 0.18)) {
-      const torsoTop = top + height * 0.22;
-      const torsoBot = top + height * 0.65;
-      const r = Math.floor((170 + hurtFlash * 85) * s);
-      const g = Math.floor(35 * s);
-      const b = Math.floor(30 * s);
-      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
-      ctx.fillRect(x, torsoTop, 1, torsoBot - torsoTop);
-
-      // Chest muscle highlights
-      if (relX > 0.38 && relX < 0.48) {
-        ctx.fillStyle = `rgba(220,70,50,${0.25 * s})`;
-        ctx.fillRect(x, torsoTop + height * 0.05, 1, height * 0.1);
+    // --- LOWER LEGS (digitigrade, bent backward at ankle) ---
+    if (relX > 0.26 && relX < 0.36) {
+      const lowerLegTop = top + height * 0.78;
+      const r = Math.floor((130 + hf * 125) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(28*s)},${Math.floor(22*s)})`;
+      ctx.fillRect(x, lowerLegTop, 1, height * 0.14);
+      // Shin guard armor
+      if (relX > 0.28 && relX < 0.34) {
+        ctx.fillStyle = `rgb(${Math.floor(50*s)},${Math.floor(40*s)},${Math.floor(30*s)})`;
+        ctx.fillRect(x, lowerLegTop + height * 0.02, 1, height * 0.08);
       }
-      if (relX > 0.52 && relX < 0.62) {
-        ctx.fillStyle = `rgba(220,70,50,${0.25 * s})`;
-        ctx.fillRect(x, torsoTop + height * 0.05, 1, height * 0.1);
+    }
+    if (relX > 0.58 && relX < 0.68) {
+      const lowerLegTop = top + height * 0.78;
+      const r = Math.floor((130 + hf * 125) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(28*s)},${Math.floor(22*s)})`;
+      ctx.fillRect(x, lowerLegTop, 1, height * 0.14);
+      if (relX > 0.60 && relX < 0.66) {
+        ctx.fillStyle = `rgb(${Math.floor(50*s)},${Math.floor(40*s)},${Math.floor(30*s)})`;
+        ctx.fillRect(x, lowerLegTop + height * 0.02, 1, height * 0.08);
       }
-      // Belt/waist band
-      ctx.fillStyle = `rgb(${Math.floor(80*s)},${Math.floor(50*s)},${Math.floor(20*s)})`;
-      ctx.fillRect(x, top + height * 0.6, 1, height * 0.04);
     }
 
-    // Arms (extending out from shoulders)
-    if ((relX > 0.12 && relX < 0.28) || (relX > 0.72 && relX < 0.88)) {
-      const armTop = top + height * 0.25;
-      const armLen = height * 0.35;
-      const r = Math.floor((155 + hurtFlash * 100) * s);
-      const g = Math.floor(30 * s);
-      const b = Math.floor(28 * s);
-      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+    // --- KNEE JOINT (bulge) ---
+    if (relX > 0.24 && relX < 0.38) {
+      ctx.fillStyle = `rgb(${Math.floor((150+hf*105)*s)},${Math.floor(35*s)},${Math.floor(28*s)})`;
+      ctx.fillRect(x, top + height * 0.75, 1, height * 0.04);
+    }
+    if (relX > 0.56 && relX < 0.70) {
+      ctx.fillStyle = `rgb(${Math.floor((150+hf*105)*s)},${Math.floor(35*s)},${Math.floor(28*s)})`;
+      ctx.fillRect(x, top + height * 0.75, 1, height * 0.04);
+    }
+
+    // --- UPPER LEGS / THIGHS (thicker, muscular) ---
+    if (relX > 0.27 && relX < 0.42) {
+      const thighTop = top + height * 0.6;
+      const r = Math.floor((155 + hf * 100) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(32*s)},${Math.floor(26*s)})`;
+      ctx.fillRect(x, thighTop, 1, height * 0.16);
+      // Muscle definition
+      if (relX > 0.32 && relX < 0.38) {
+        ctx.fillStyle = `rgba(200,60,40,${0.15*s})`;
+        ctx.fillRect(x, thighTop + height * 0.03, 1, height * 0.08);
+      }
+    }
+    if (relX > 0.55 && relX < 0.70) {
+      const thighTop = top + height * 0.6;
+      const r = Math.floor((155 + hf * 100) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(32*s)},${Math.floor(26*s)})`;
+      ctx.fillRect(x, thighTop, 1, height * 0.16);
+    }
+
+    // --- LOINCLOTH / WAIST WRAP ---
+    if (relX > 0.25 && relX < 0.72) {
+      ctx.fillStyle = `rgb(${Math.floor(65*s)},${Math.floor(40*s)},${Math.floor(15*s)})`;
+      ctx.fillRect(x, top + height * 0.56, 1, height * 0.06);
+      // Gold trim on belt
+      ctx.fillStyle = `rgba(200,160,40,${0.4*s})`;
+      ctx.fillRect(x, top + height * 0.56, 1, height * 0.01);
+    }
+
+    // --- TORSO (V-shape, wide shoulders to narrow waist) ---
+    const torsoWidthAt = (y_pct) => {
+      // Wider at top (0.25), narrow at bottom (0.55)
+      const t = (y_pct - 0.25) / 0.30;
+      return 0.22 - t * 0.06; // half-width from center
+    };
+    const yStart = 0.25, yEnd = 0.57;
+    const yPct = (relX > 0.5) ? 0 : 0; // just for scoping
+    if (relX > 0.28 && relX < 0.72) {
+      for (let rowPct = yStart; rowPct < yEnd; rowPct += 0.01) {
+        const hw = torsoWidthAt(rowPct);
+        if (relX > (0.5 - hw) && relX < (0.5 + hw)) {
+          const r = Math.floor((160 + hf * 95) * s);
+          const g = Math.floor(35 * s);
+          const b = Math.floor(30 * s);
+          ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+          ctx.fillRect(x, top + height * rowPct, 1, height * 0.01);
+        }
+      }
+    }
+
+    // Chest details - pectoral shadows and abs
+    if (relX > 0.36 && relX < 0.48) {
+      ctx.fillStyle = `rgba(200,60,40,${0.2*s})`;
+      ctx.fillRect(x, top + height * 0.28, 1, height * 0.08);
+    }
+    if (relX > 0.52 && relX < 0.64) {
+      ctx.fillStyle = `rgba(200,60,40,${0.2*s})`;
+      ctx.fillRect(x, top + height * 0.28, 1, height * 0.08);
+    }
+    // Center chest line
+    if (relX > 0.49 && relX < 0.51) {
+      ctx.fillStyle = `rgba(100,20,15,${0.3*s})`;
+      ctx.fillRect(x, top + height * 0.28, 1, height * 0.25);
+    }
+
+    // --- ARMS ---
+    // Left arm (holds a curved sword - khanda/vel)
+    if (relX > 0.08 && relX < 0.22) {
+      const armTop = top + height * 0.27;
+      const armLen = height * 0.30;
+      const r = Math.floor((150 + hf * 105) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(30*s)},${Math.floor(25*s)})`;
       ctx.fillRect(x, armTop, 1, armLen);
-      // Clawed hands
-      if (relX < 0.18 || relX > 0.82) {
-        ctx.fillStyle = `rgb(${Math.floor(100*s)},${Math.floor(20*s)},${Math.floor(15*s)})`;
-        ctx.fillRect(x, armTop + armLen, 1, height * 0.06);
+      // Bracer/wrist guard
+      ctx.fillStyle = `rgb(${Math.floor(55*s)},${Math.floor(45*s)},${Math.floor(30*s)})`;
+      ctx.fillRect(x, armTop + armLen - height * 0.05, 1, height * 0.05);
+      // SWORD (curved khanda) held in left hand
+      if (relX > 0.08 && relX < 0.16) {
+        const swordTop = attacking ? armTop - height * 0.15 : armTop + height * 0.1;
+        const swordLen = height * 0.35;
+        // Blade
+        ctx.fillStyle = `rgb(${Math.floor(180*s)},${Math.floor(185*s)},${Math.floor(195*s)})`;
+        ctx.fillRect(x, swordTop, 1, swordLen);
+        // Edge highlight
+        if (relX < 0.12) {
+          ctx.fillStyle = `rgba(220,230,255,${0.4*s})`;
+          ctx.fillRect(x, swordTop, 1, swordLen);
+        }
+        // Hilt/guard
+        ctx.fillStyle = `rgb(${Math.floor(160*s)},${Math.floor(130*s)},${Math.floor(40*s)})`;
+        ctx.fillRect(x, swordTop + swordLen, 1, height * 0.03);
       }
     }
-
-    // Shoulders (broad shoulder pads)
-    if (relX > 0.18 && relX < 0.82) {
-      const shStart = top + height * 0.2;
-      const shH = height * 0.06;
-      if ((relX > 0.18 && relX < 0.35) || (relX > 0.65 && relX < 0.82)) {
-        const r = Math.floor((190 + hurtFlash * 65) * s);
-        const g = Math.floor(45 * s);
-        const b = Math.floor(35 * s);
-        ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
-        ctx.fillRect(x, shStart, 1, shH);
-      }
+    // Right arm
+    if (relX > 0.75 && relX < 0.88) {
+      const armTop = top + height * 0.27;
+      const armLen = height * 0.30;
+      const r = Math.floor((150 + hf * 105) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(30*s)},${Math.floor(25*s)})`;
+      ctx.fillRect(x, armTop, 1, armLen);
+      ctx.fillStyle = `rgb(${Math.floor(55*s)},${Math.floor(45*s)},${Math.floor(30*s)})`;
+      ctx.fillRect(x, armTop + armLen - height * 0.05, 1, height * 0.05);
+      // Fist/claw
+      ctx.fillStyle = `rgb(${Math.floor(120*s)},${Math.floor(25*s)},${Math.floor(18*s)})`;
+      ctx.fillRect(x, armTop + armLen, 1, height * 0.05);
     }
 
-    // Head (rounded, with strong jawline)
+    // --- SHOULDERS (armored pauldrons) ---
+    if ((relX > 0.15 && relX < 0.32) || (relX > 0.68 && relX < 0.85)) {
+      const shY = top + height * 0.22;
+      ctx.fillStyle = `rgb(${Math.floor(60*s)},${Math.floor(50*s)},${Math.floor(35*s)})`;
+      ctx.fillRect(x, shY, 1, height * 0.06);
+      // Pauldron highlight
+      ctx.fillStyle = `rgba(180,150,80,${0.2*s})`;
+      ctx.fillRect(x, shY, 1, height * 0.02);
+    }
+
+    // --- NECK ---
+    if (relX > 0.40 && relX < 0.60) {
+      ctx.fillStyle = `rgb(${Math.floor((145+hf*110)*s)},${Math.floor(30*s)},${Math.floor(25*s)})`;
+      ctx.fillRect(x, top + height * 0.18, 1, height * 0.06);
+    }
+
+    // --- HEAD ---
     if (relX > 0.32 && relX < 0.68) {
       const headTop = top + height * 0.06;
-      const headBot = top + height * 0.22;
-      // Widen in middle of head
+      const headBot = top + height * 0.19;
       const headDist = Math.abs(relX - 0.5) / 0.18;
       if (headDist < 1) {
-        const r = Math.floor((200 + hurtFlash * 55) * s);
-        const g = Math.floor(55 * s);
-        const b = Math.floor(45 * s);
-        ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+        const r = Math.floor((185 + hf * 70) * s);
+        ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(50*s)},${Math.floor(40*s)})`;
         ctx.fillRect(x, headTop, 1, headBot - headTop);
       }
-    }
-
-    // Horns (curved upward from head)
-    if ((relX > 0.26 && relX < 0.35) || (relX > 0.65 && relX < 0.74)) {
-      const hornTop = top;
-      const hornBot = top + height * 0.1;
-      const r = Math.floor(60 * s);
-      const g = Math.floor(50 * s);
-      const b = Math.floor(30 * s);
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.fillRect(x, hornTop, 1, hornBot - hornTop);
-      // Horn tip glow
-      ctx.fillStyle = `rgba(255,120,40,${0.4 * s})`;
-      ctx.fillRect(x, hornTop, 1, height * 0.02);
-    }
-
-    // Eyes (glowing orange-yellow, menacing)
-    if ((relX > 0.37 && relX < 0.44) || (relX > 0.56 && relX < 0.63)) {
-      const eyeY = top + height * 0.1;
-      const eyeH = height * 0.04;
-      // Eye glow aura
-      ctx.fillStyle = `rgba(255,200,0,${0.3 * s})`;
-      ctx.fillRect(x, eyeY - height * 0.01, 1, eyeH + height * 0.02);
-      // Eye core
-      ctx.fillStyle = `rgb(255,${Math.floor(180 * s)},0)`;
-      ctx.fillRect(x, eyeY, 1, eyeH);
-      // Pupil
-      if ((relX > 0.39 && relX < 0.42) || (relX > 0.58 && relX < 0.61)) {
-        ctx.fillStyle = `rgb(${Math.floor(200*s)},0,0)`;
-        ctx.fillRect(x, eyeY + height * 0.01, 1, eyeH * 0.5);
+      // Jaw line (stronger/wider at bottom of head)
+      if (relX > 0.34 && relX < 0.66 && headDist < 1) {
+        ctx.fillStyle = `rgb(${Math.floor((170+hf*85)*s)},${Math.floor(42*s)},${Math.floor(35*s)})`;
+        ctx.fillRect(x, top + height * 0.16, 1, height * 0.03);
       }
     }
 
-    // Mouth/fangs
+    // --- HORNS (curved, ridged) ---
+    if ((relX > 0.22 && relX < 0.34) || (relX > 0.66 && relX < 0.78)) {
+      const hornBase = top + height * 0.08;
+      const hornTip = top;
+      // Thicker at base
+      const hornRelX = relX < 0.5 ? (relX - 0.22) / 0.12 : (0.78 - relX) / 0.12;
+      if (hornRelX > 0.2 && hornRelX < 0.8) {
+        ctx.fillStyle = `rgb(${Math.floor(70*s)},${Math.floor(55*s)},${Math.floor(30*s)})`;
+        ctx.fillRect(x, hornTip, 1, hornBase - hornTip);
+        // Horn ridges
+        ctx.fillStyle = `rgb(${Math.floor(90*s)},${Math.floor(75*s)},${Math.floor(45*s)})`;
+        ctx.fillRect(x, hornTip + height * 0.02, 1, height * 0.01);
+        ctx.fillRect(x, hornTip + height * 0.05, 1, height * 0.01);
+        // Glowing tip
+        ctx.fillStyle = `rgba(255,120,40,${0.5*s})`;
+        ctx.fillRect(x, hornTip, 1, height * 0.015);
+      }
+    }
+
+    // --- EYES (glowing orange, menacing slits) ---
+    if ((relX > 0.37 && relX < 0.44) || (relX > 0.56 && relX < 0.63)) {
+      const eyeY = top + height * 0.10;
+      const eyeH = height * 0.03;
+      ctx.fillStyle = `rgba(255,200,0,${0.4*s})`;
+      ctx.fillRect(x, eyeY - height * 0.01, 1, eyeH + height * 0.02);
+      ctx.fillStyle = `rgb(255,${Math.floor(180*s)},0)`;
+      ctx.fillRect(x, eyeY, 1, eyeH);
+      if ((relX > 0.39 && relX < 0.42) || (relX > 0.58 && relX < 0.61)) {
+        ctx.fillStyle = `rgb(${Math.floor(200*s)},0,0)`;
+        ctx.fillRect(x, eyeY + height * 0.005, 1, eyeH * 0.6);
+      }
+    }
+
+    // --- MOUTH / FANGS ---
     if (relX > 0.40 && relX < 0.60) {
-      const mouthY = top + height * 0.16;
+      const mouthY = top + height * 0.14;
       ctx.fillStyle = `rgb(${Math.floor(40*s)},0,0)`;
-      ctx.fillRect(x, mouthY, 1, height * 0.03);
-      // Fangs
-      if ((relX > 0.42 && relX < 0.45) || (relX > 0.55 && relX < 0.58)) {
+      ctx.fillRect(x, mouthY, 1, height * 0.025);
+      if ((relX > 0.42 && relX < 0.46) || (relX > 0.54 && relX < 0.58)) {
         ctx.fillStyle = `rgb(${Math.floor(230*s)},${Math.floor(220*s)},${Math.floor(200*s)})`;
-        ctx.fillRect(x, mouthY + height * 0.02, 1, height * 0.025);
+        ctx.fillRect(x, mouthY + height * 0.015, 1, height * 0.02);
       }
     }
   }
 
   drawRakshasaColumn(ctx, x, top, height, relX, shade, sprite) {
-    // Rakshasa - massive hulking purple-black demon with three eyes, heavy armor, and huge horns
+    // Rakshasa - massive hulking purple-black demon with three eyes, heavy armor, war mace, thick legs
     const s = shade;
     const hf = sprite.hurt ? 0.7 : 0;
+    const attacking = sprite.attackAnim > 0;
 
-    // Legs (thick, trunk-like)
-    if ((relX > 0.18 && relX < 0.38) || (relX > 0.62 && relX < 0.82)) {
-      const legTop = top + height * 0.62;
-      const r = Math.floor((80 + hf * 120) * s);
-      const g = Math.floor(40 * s);
-      const b = Math.floor(65 * s);
-      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
-      ctx.fillRect(x, legTop, 1, height * 0.38);
-      // Armored shin guards
-      if ((relX > 0.22 && relX < 0.34) || (relX > 0.66 && relX < 0.78)) {
-        ctx.fillStyle = `rgb(${Math.floor(50*s)},${Math.floor(45*s)},${Math.floor(55*s)})`;
-        ctx.fillRect(x, legTop + height * 0.18, 1, height * 0.15);
-        // Metal highlight
-        ctx.fillStyle = `rgba(140,130,160,${0.2*s})`;
-        ctx.fillRect(x, legTop + height * 0.22, 1, height * 0.03);
+    // --- FEET (armored boots) ---
+    if (relX > 0.20 && relX < 0.36) {
+      ctx.fillStyle = `rgb(${Math.floor(40*s)},${Math.floor(35*s)},${Math.floor(45*s)})`;
+      ctx.fillRect(x, top + height * 0.92, 1, height * 0.08);
+    }
+    if (relX > 0.60 && relX < 0.76) {
+      ctx.fillStyle = `rgb(${Math.floor(40*s)},${Math.floor(35*s)},${Math.floor(45*s)})`;
+      ctx.fillRect(x, top + height * 0.92, 1, height * 0.08);
+    }
+
+    // --- LOWER LEGS (thick, armored) ---
+    if (relX > 0.22 && relX < 0.38) {
+      const legTop = top + height * 0.76;
+      const r = Math.floor((75 + hf * 130) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(38*s)},${Math.floor(60*s)})`;
+      ctx.fillRect(x, legTop, 1, height * 0.16);
+      // Greaves (armor)
+      if (relX > 0.25 && relX < 0.35) {
+        ctx.fillStyle = `rgb(${Math.floor(45*s)},${Math.floor(42*s)},${Math.floor(52*s)})`;
+        ctx.fillRect(x, legTop + height * 0.03, 1, height * 0.10);
+        ctx.fillStyle = `rgba(130,120,150,${0.2*s})`;
+        ctx.fillRect(x, legTop + height * 0.06, 1, height * 0.02);
+      }
+    }
+    if (relX > 0.58 && relX < 0.74) {
+      const legTop = top + height * 0.76;
+      const r = Math.floor((75 + hf * 130) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(38*s)},${Math.floor(60*s)})`;
+      ctx.fillRect(x, legTop, 1, height * 0.16);
+      if (relX > 0.61 && relX < 0.71) {
+        ctx.fillStyle = `rgb(${Math.floor(45*s)},${Math.floor(42*s)},${Math.floor(52*s)})`;
+        ctx.fillRect(x, legTop + height * 0.03, 1, height * 0.10);
       }
     }
 
-    // Massive torso with armor plates
-    if (relX > 0.15 && relX < 0.85) {
-      const torsoTop = top + height * 0.2;
-      const torsoBot = top + height * 0.64;
-      // Torso tapers: widest at chest
-      const distFromCenter = Math.abs(relX - 0.5);
-      const maxW = (relX > 0.15 && relX < 0.85) ? 0.35 : 0;
-      if (distFromCenter < maxW) {
-        const r = Math.floor((90 + hf * 110) * s);
-        const g = Math.floor(45 * s);
-        const b = Math.floor(75 * s);
-        ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
-        ctx.fillRect(x, torsoTop, 1, torsoBot - torsoTop);
-      }
+    // --- KNEE GUARDS ---
+    if (relX > 0.20 && relX < 0.40) {
+      ctx.fillStyle = `rgb(${Math.floor(50*s)},${Math.floor(48*s)},${Math.floor(58*s)})`;
+      ctx.fillRect(x, top + height * 0.73, 1, height * 0.04);
+      ctx.fillStyle = `rgba(160,150,180,${0.15*s})`;
+      ctx.fillRect(x, top + height * 0.74, 1, height * 0.01);
+    }
+    if (relX > 0.56 && relX < 0.76) {
+      ctx.fillStyle = `rgb(${Math.floor(50*s)},${Math.floor(48*s)},${Math.floor(58*s)})`;
+      ctx.fillRect(x, top + height * 0.73, 1, height * 0.04);
     }
 
-    // Chest armor plate (dark metal)
-    if (relX > 0.25 && relX < 0.75) {
-      const plateTop = top + height * 0.25;
-      ctx.fillStyle = `rgb(${Math.floor(45*s)},${Math.floor(40*s)},${Math.floor(55*s)})`;
-      ctx.fillRect(x, plateTop, 1, height * 0.2);
-      // Armor rivets/detail
-      if (relX > 0.35 && relX < 0.65) {
-        ctx.fillStyle = `rgba(180,160,200,${0.15*s})`;
-        ctx.fillRect(x, plateTop + height * 0.05, 1, height * 0.02);
-        ctx.fillRect(x, plateTop + height * 0.12, 1, height * 0.02);
-      }
-      // Skull emblem on chest
-      if (relX > 0.42 && relX < 0.58) {
-        ctx.fillStyle = `rgba(200,180,220,${0.25*s})`;
-        ctx.fillRect(x, plateTop + height * 0.07, 1, height * 0.06);
-      }
-    }
-
-    // Arms (massive, with spiked bracers)
-    if ((relX > 0.05 && relX < 0.2) || (relX > 0.8 && relX < 0.95)) {
-      const armTop = top + height * 0.22;
-      const armLen = height * 0.4;
+    // --- UPPER LEGS / THIGHS ---
+    if (relX > 0.22 && relX < 0.42) {
       const r = Math.floor((85 + hf * 120) * s);
-      const g = Math.floor(42 * s);
-      const b = Math.floor(70 * s);
-      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(42*s)},${Math.floor(68*s)})`;
+      ctx.fillRect(x, top + height * 0.58, 1, height * 0.16);
+    }
+    if (relX > 0.55 && relX < 0.75) {
+      const r = Math.floor((85 + hf * 120) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(42*s)},${Math.floor(68*s)})`;
+      ctx.fillRect(x, top + height * 0.58, 1, height * 0.16);
+    }
+
+    // --- ARMORED SKIRT / WAIST ---
+    if (relX > 0.18 && relX < 0.78) {
+      ctx.fillStyle = `rgb(${Math.floor(42*s)},${Math.floor(38*s)},${Math.floor(50*s)})`;
+      ctx.fillRect(x, top + height * 0.54, 1, height * 0.06);
+      // Metal studs
+      const studX = Math.floor(relX * 12) % 2;
+      if (studX === 0) {
+        ctx.fillStyle = `rgba(150,140,170,${0.25*s})`;
+        ctx.fillRect(x, top + height * 0.555, 1, height * 0.015);
+      }
+    }
+
+    // --- MASSIVE TORSO with armor plates ---
+    if (relX > 0.15 && relX < 0.85) {
+      const distC = Math.abs(relX - 0.5);
+      if (distC < 0.35) {
+        const r = Math.floor((88 + hf * 115) * s);
+        ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(44*s)},${Math.floor(72*s)})`;
+        ctx.fillRect(x, top + height * 0.22, 1, height * 0.33);
+      }
+    }
+
+    // Chest armor plate
+    if (relX > 0.24 && relX < 0.76) {
+      const plateTop = top + height * 0.25;
+      ctx.fillStyle = `rgb(${Math.floor(42*s)},${Math.floor(38*s)},${Math.floor(52*s)})`;
+      ctx.fillRect(x, plateTop, 1, height * 0.18);
+      // Armor rivets
+      if (relX > 0.34 && relX < 0.66) {
+        ctx.fillStyle = `rgba(170,155,195,${0.15*s})`;
+        ctx.fillRect(x, plateTop + height * 0.04, 1, height * 0.015);
+        ctx.fillRect(x, plateTop + height * 0.10, 1, height * 0.015);
+      }
+      // Skull/demon emblem
+      if (relX > 0.42 && relX < 0.58) {
+        ctx.fillStyle = `rgba(200,170,220,${0.2*s})`;
+        ctx.fillRect(x, plateTop + height * 0.06, 1, height * 0.05);
+      }
+    }
+
+    // --- LEFT ARM with WAR MACE ---
+    if (relX > 0.02 && relX < 0.18) {
+      const armTop = top + height * 0.24;
+      const armLen = height * 0.35;
+      const r = Math.floor((82 + hf * 125) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(40*s)},${Math.floor(65*s)})`;
       ctx.fillRect(x, armTop, 1, armLen);
-      // Spiked bracers
-      ctx.fillStyle = `rgb(${Math.floor(50*s)},${Math.floor(50*s)},${Math.floor(50*s)})`;
-      ctx.fillRect(x, armTop + height * 0.15, 1, height * 0.08);
-      // Clawed fists
-      ctx.fillStyle = `rgb(${Math.floor(60*s)},${Math.floor(30*s)},${Math.floor(45*s)})`;
-      ctx.fillRect(x, armTop + armLen, 1, height * 0.08);
-      // Claw tips
-      if (relX < 0.12 || relX > 0.88) {
-        ctx.fillStyle = `rgb(${Math.floor(200*s)},${Math.floor(190*s)},${Math.floor(170*s)})`;
-        ctx.fillRect(x, armTop + armLen + height * 0.06, 1, height * 0.04);
+      // Spiked bracer
+      ctx.fillStyle = `rgb(${Math.floor(48*s)},${Math.floor(48*s)},${Math.floor(55*s)})`;
+      ctx.fillRect(x, armTop + height * 0.12, 1, height * 0.07);
+      // WAR MACE
+      if (relX > 0.02 && relX < 0.12) {
+        const maceTop = attacking ? armTop - height * 0.1 : armTop + armLen - height * 0.05;
+        // Shaft
+        ctx.fillStyle = `rgb(${Math.floor(60*s)},${Math.floor(50*s)},${Math.floor(35*s)})`;
+        ctx.fillRect(x, maceTop, 1, height * 0.30);
+        // Mace head (spiked ball)
+        if (relX > 0.03 && relX < 0.11) {
+          ctx.fillStyle = `rgb(${Math.floor(55*s)},${Math.floor(55*s)},${Math.floor(60*s)})`;
+          ctx.fillRect(x, maceTop - height * 0.06, 1, height * 0.08);
+          // Spikes
+          ctx.fillStyle = `rgb(${Math.floor(120*s)},${Math.floor(115*s)},${Math.floor(130*s)})`;
+          ctx.fillRect(x, maceTop - height * 0.07, 1, height * 0.02);
+          ctx.fillRect(x, maceTop + height * 0.01, 1, height * 0.02);
+        }
+      }
+    }
+    // Right arm (fist)
+    if (relX > 0.82 && relX < 0.98) {
+      const armTop = top + height * 0.24;
+      const armLen = height * 0.35;
+      const r = Math.floor((82 + hf * 125) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(40*s)},${Math.floor(65*s)})`;
+      ctx.fillRect(x, armTop, 1, armLen);
+      ctx.fillStyle = `rgb(${Math.floor(55*s)},${Math.floor(28*s)},${Math.floor(42*s)})`;
+      ctx.fillRect(x, armTop + armLen, 1, height * 0.06);
+    }
+
+    // --- SHOULDERS (massive spiked pauldrons) ---
+    if ((relX > 0.10 && relX < 0.30) || (relX > 0.70 && relX < 0.90)) {
+      const shY = top + height * 0.18;
+      ctx.fillStyle = `rgb(${Math.floor(48*s)},${Math.floor(45*s)},${Math.floor(55*s)})`;
+      ctx.fillRect(x, shY, 1, height * 0.07);
+      // Spike on top
+      if ((relX > 0.14 && relX < 0.18) || (relX > 0.82 && relX < 0.86)) {
+        ctx.fillStyle = `rgb(${Math.floor(70*s)},${Math.floor(65*s)},${Math.floor(75*s)})`;
+        ctx.fillRect(x, shY - height * 0.03, 1, height * 0.04);
       }
     }
 
-    // Head (wide, brutish)
-    if (relX > 0.28 && relX < 0.72) {
-      const headTop = top + height * 0.08;
-      const headBot = top + height * 0.22;
-      const r = Math.floor((110 + hf * 90) * s);
-      const g = Math.floor(40 * s);
-      const b = Math.floor(70 * s);
-      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
-      ctx.fillRect(x, headTop, 1, headBot - headTop);
-      // Brow ridge (darker strip)
-      ctx.fillStyle = `rgb(${Math.floor(70*s)},${Math.floor(25*s)},${Math.floor(50*s)})`;
-      ctx.fillRect(x, headTop + height * 0.06, 1, height * 0.02);
-    }
-
-    // Huge curved horns
-    if ((relX > 0.15 && relX < 0.32) || (relX > 0.68 && relX < 0.85)) {
-      const hornBot = top + height * 0.12;
-      const hornH = height * 0.12;
-      // Outer horn base (dark bone)
-      ctx.fillStyle = `rgb(${Math.floor(70*s)},${Math.floor(60*s)},${Math.floor(40*s)})`;
-      ctx.fillRect(x, hornBot - hornH, 1, hornH);
-      // Horn ridges
-      ctx.fillStyle = `rgb(${Math.floor(90*s)},${Math.floor(80*s)},${Math.floor(55*s)})`;
-      ctx.fillRect(x, hornBot - hornH + height * 0.03, 1, height * 0.015);
-      // Horn tip (sharp, lighter)
-      if ((relX > 0.15 && relX < 0.22) || (relX > 0.78 && relX < 0.85)) {
-        ctx.fillStyle = `rgb(${Math.floor(120*s)},${Math.floor(110*s)},${Math.floor(80*s)})`;
-        ctx.fillRect(x, top, 1, height * 0.04);
-      }
-    }
-
-    // Three eyes (glowing red, the middle one on forehead)
-    // Left eye
-    if (relX > 0.33 && relX < 0.41) {
-      ctx.fillStyle = `rgba(255,50,0,${0.3*s})`;
-      ctx.fillRect(x, top + height * 0.12, 1, height * 0.05);
-      ctx.fillStyle = `rgb(255,${Math.floor(30*s)},0)`;
-      ctx.fillRect(x, top + height * 0.13, 1, height * 0.03);
-    }
-    // Right eye
-    if (relX > 0.59 && relX < 0.67) {
-      ctx.fillStyle = `rgba(255,50,0,${0.3*s})`;
-      ctx.fillRect(x, top + height * 0.12, 1, height * 0.05);
-      ctx.fillStyle = `rgb(255,${Math.floor(30*s)},0)`;
-      ctx.fillRect(x, top + height * 0.13, 1, height * 0.03);
-    }
-    // Third eye (forehead, larger, brighter)
-    if (relX > 0.45 && relX < 0.55) {
-      ctx.fillStyle = `rgba(255,80,0,${0.4*s})`;
-      ctx.fillRect(x, top + height * 0.085, 1, height * 0.05);
-      ctx.fillStyle = `rgb(255,${Math.floor(100*s)},0)`;
-      ctx.fillRect(x, top + height * 0.095, 1, height * 0.03);
-    }
-
-    // Mouth/jaw (wide gaping maw with tusks)
+    // --- NECK (thick) ---
     if (relX > 0.35 && relX < 0.65) {
-      ctx.fillStyle = `rgb(${Math.floor(30*s)},0,${Math.floor(10*s)})`;
-      ctx.fillRect(x, top + height * 0.17, 1, height * 0.04);
-      // Tusks (upward curving from lower jaw)
-      if ((relX > 0.36 && relX < 0.40) || (relX > 0.60 && relX < 0.64)) {
-        ctx.fillStyle = `rgb(${Math.floor(220*s)},${Math.floor(210*s)},${Math.floor(180*s)})`;
-        ctx.fillRect(x, top + height * 0.15, 1, height * 0.04);
+      ctx.fillStyle = `rgb(${Math.floor((95+hf*110)*s)},${Math.floor(38*s)},${Math.floor(62*s)})`;
+      ctx.fillRect(x, top + height * 0.17, 1, height * 0.06);
+    }
+
+    // --- HEAD (wide, brutish) ---
+    if (relX > 0.28 && relX < 0.72) {
+      const headTop = top + height * 0.07;
+      const headBot = top + height * 0.18;
+      const r = Math.floor((105 + hf * 95) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(38*s)},${Math.floor(65*s)})`;
+      ctx.fillRect(x, headTop, 1, headBot - headTop);
+      // Heavy brow ridge
+      ctx.fillStyle = `rgb(${Math.floor(65*s)},${Math.floor(22*s)},${Math.floor(45*s)})`;
+      ctx.fillRect(x, headTop + height * 0.05, 1, height * 0.02);
+    }
+
+    // --- HUGE CURVED HORNS ---
+    if ((relX > 0.12 && relX < 0.30) || (relX > 0.70 && relX < 0.88)) {
+      const hornBot = top + height * 0.10;
+      const hornH = height * 0.10;
+      ctx.fillStyle = `rgb(${Math.floor(65*s)},${Math.floor(55*s)},${Math.floor(38*s)})`;
+      ctx.fillRect(x, hornBot - hornH, 1, hornH);
+      ctx.fillStyle = `rgb(${Math.floor(85*s)},${Math.floor(75*s)},${Math.floor(50*s)})`;
+      ctx.fillRect(x, hornBot - hornH + height * 0.025, 1, height * 0.012);
+      if ((relX > 0.12 && relX < 0.20) || (relX > 0.80 && relX < 0.88)) {
+        ctx.fillStyle = `rgb(${Math.floor(110*s)},${Math.floor(100*s)},${Math.floor(72*s)})`;
+        ctx.fillRect(x, top, 1, height * 0.035);
+      }
+    }
+
+    // --- THREE EYES ---
+    if (relX > 0.33 && relX < 0.41) {
+      ctx.fillStyle = `rgba(255,50,0,${0.35*s})`;
+      ctx.fillRect(x, top + height * 0.11, 1, height * 0.04);
+      ctx.fillStyle = `rgb(255,${Math.floor(30*s)},0)`;
+      ctx.fillRect(x, top + height * 0.12, 1, height * 0.025);
+    }
+    if (relX > 0.59 && relX < 0.67) {
+      ctx.fillStyle = `rgba(255,50,0,${0.35*s})`;
+      ctx.fillRect(x, top + height * 0.11, 1, height * 0.04);
+      ctx.fillStyle = `rgb(255,${Math.floor(30*s)},0)`;
+      ctx.fillRect(x, top + height * 0.12, 1, height * 0.025);
+    }
+    // Third eye (forehead)
+    if (relX > 0.45 && relX < 0.55) {
+      ctx.fillStyle = `rgba(255,80,0,${0.45*s})`;
+      ctx.fillRect(x, top + height * 0.08, 1, height * 0.04);
+      ctx.fillStyle = `rgb(255,${Math.floor(100*s)},0)`;
+      ctx.fillRect(x, top + height * 0.088, 1, height * 0.025);
+    }
+
+    // --- MOUTH with TUSKS ---
+    if (relX > 0.35 && relX < 0.65) {
+      ctx.fillStyle = `rgb(${Math.floor(28*s)},0,${Math.floor(10*s)})`;
+      ctx.fillRect(x, top + height * 0.155, 1, height * 0.03);
+      if ((relX > 0.36 && relX < 0.41) || (relX > 0.59 && relX < 0.64)) {
+        ctx.fillStyle = `rgb(${Math.floor(215*s)},${Math.floor(205*s)},${Math.floor(175*s)})`;
+        ctx.fillRect(x, top + height * 0.14, 1, height * 0.035);
       }
     }
   }
 
   drawNagaColumn(ctx, x, top, height, relX, shade, sprite) {
-    // Naga - majestic cobra serpent with expanded hood, scales, and hypnotic eyes
+    // Naga - cobra serpent with expanded hood, visible scales, hypnotic eyes, and energy staff
     const s = shade;
     const hf = sprite.hurt ? 0.6 : 0;
+    const attacking = sprite.attackAnim > 0;
 
-    // Serpentine body (sinuous, narrowing downward with scale pattern)
-    const bodyCenter = 0.5;
-    const bodyHalfW = 0.12 + 0.04 * Math.sin(relX * Math.PI * 3);
-    if (relX > (bodyCenter - bodyHalfW) && relX < (bodyCenter + bodyHalfW)) {
-      const bodyTop = top + height * 0.35;
-      const bodyBot = top + height;
-      const r = Math.floor((25 + hf * 130) * s);
-      const g = Math.floor(110 * s);
-      const b = Math.floor(70 * s);
-      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
-      ctx.fillRect(x, bodyTop, 1, bodyBot - bodyTop);
-
-      // Scale pattern (diamond-shaped highlights)
-      const scalePhase = Math.floor(relX * 20) % 2;
-      if (scalePhase === 0) {
-        ctx.fillStyle = `rgba(60,150,100,${0.3*s})`;
-        for (let sy = bodyTop; sy < bodyBot; sy += height * 0.08) {
-          ctx.fillRect(x, sy, 1, height * 0.03);
+    // --- TAIL COILS at base (multiple overlapping coils for ground contact) ---
+    // Bottom coil
+    if (relX > 0.20 && relX < 0.80) {
+      const coilDist = Math.abs(relX - 0.5) / 0.30;
+      if (coilDist < 1) {
+        const intensity = (1 - coilDist * coilDist);
+        const r = Math.floor((18 + hf * 100) * s * intensity);
+        const g = Math.floor(80 * s * intensity);
+        const b = Math.floor(50 * s * intensity);
+        ctx.fillStyle = `rgb(${Math.min(255,Math.max(0,r))},${Math.max(0,g)},${Math.max(0,b)})`;
+        ctx.fillRect(x, top + height * 0.88, 1, height * 0.12);
+        // Scale pattern on coil
+        if (Math.floor(relX * 16) % 2 === 0) {
+          ctx.fillStyle = `rgba(50,120,80,${0.25*s*intensity})`;
+          ctx.fillRect(x, top + height * 0.90, 1, height * 0.04);
         }
       }
-
-      // Belly (lighter center stripe)
-      if (Math.abs(relX - 0.5) < 0.05) {
-        ctx.fillStyle = `rgba(120,200,140,${0.2*s})`;
-        ctx.fillRect(x, bodyTop, 1, bodyBot - bodyTop);
-      }
     }
-
-    // Tail coil at bottom (wider base suggesting coiled body)
-    if (relX > 0.3 && relX < 0.7) {
-      const coilTop = top + height * 0.85;
-      const coilDist = Math.abs(relX - 0.5) / 0.2;
+    // Middle coil (slightly offset)
+    if (relX > 0.25 && relX < 0.75) {
+      const coilDist = Math.abs(relX - 0.48) / 0.25;
       if (coilDist < 1) {
-        const r = Math.floor((20 + hf * 100) * s);
-        const g = Math.floor(90 * s);
-        const b = Math.floor(55 * s);
-        ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
-        ctx.fillRect(x, coilTop, 1, height * 0.15);
+        const intensity = (1 - coilDist * coilDist);
+        const r = Math.floor((22 + hf * 110) * s * intensity);
+        const g = Math.floor(95 * s * intensity);
+        const b = Math.floor(58 * s * intensity);
+        ctx.fillStyle = `rgb(${Math.min(255,Math.max(0,r))},${Math.max(0,g)},${Math.max(0,b)})`;
+        ctx.fillRect(x, top + height * 0.82, 1, height * 0.08);
       }
     }
 
-    // Expanded cobra hood (wide, flattened, with markings)
-    if (relX > 0.12 && relX < 0.88) {
-      const hoodTop = top + height * 0.05;
-      const hoodBot = top + height * 0.38;
-      // Hood shape: wider in middle, narrow at edges
-      const hoodDist = Math.abs(relX - 0.5) / 0.38;
+    // --- SERPENTINE BODY (S-curve upward) ---
+    const bodyCenter = 0.5;
+    const bodyHalfW = 0.10;
+    if (relX > (bodyCenter - bodyHalfW - 0.03) && relX < (bodyCenter + bodyHalfW + 0.03)) {
+      const bodyTop = top + height * 0.35;
+      const bodyBot = top + height * 0.84;
+      const bDist = Math.abs(relX - bodyCenter) / (bodyHalfW + 0.03);
+      if (bDist < 1) {
+        const r = Math.floor((25 + hf * 130) * s);
+        const g = Math.floor(105 * s);
+        const b = Math.floor(65 * s);
+        ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+        ctx.fillRect(x, bodyTop, 1, bodyBot - bodyTop);
+
+        // Detailed scale pattern (alternating diamond-shapes)
+        const scaleCol = Math.floor(relX * 24);
+        const scalePhase = scaleCol % 2;
+        for (let sy = bodyTop; sy < bodyBot; sy += height * 0.06) {
+          const scaleOff = scalePhase * height * 0.03;
+          ctx.fillStyle = `rgba(50,140,90,${0.25*s})`;
+          ctx.fillRect(x, sy + scaleOff, 1, height * 0.025);
+        }
+
+        // Belly (lighter center stripe with cross-hatched belly scales)
+        if (Math.abs(relX - 0.5) < 0.04) {
+          ctx.fillStyle = `rgba(130,210,150,${0.2*s})`;
+          ctx.fillRect(x, bodyTop, 1, bodyBot - bodyTop);
+          // Belly scale lines
+          for (let sy = bodyTop; sy < bodyBot; sy += height * 0.04) {
+            ctx.fillStyle = `rgba(80,160,100,${0.15*s})`;
+            ctx.fillRect(x, sy, 1, height * 0.01);
+          }
+        }
+      }
+    }
+
+    // --- ARMS (humanoid upper body - Naga warriors have arms) ---
+    // Left arm holding energy staff
+    if (relX > 0.08 && relX < 0.22) {
+      const armTop = top + height * 0.22;
+      const armLen = height * 0.25;
+      const r = Math.floor((28 + hf * 120) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(90*s)},${Math.floor(55*s)})`;
+      ctx.fillRect(x, armTop, 1, armLen);
+      // Scale pattern on arm
+      if (Math.floor(relX * 20) % 2 === 0) {
+        ctx.fillStyle = `rgba(45,130,85,${0.25*s})`;
+        ctx.fillRect(x, armTop + height * 0.05, 1, height * 0.1);
+      }
+      // ENERGY STAFF
+      if (relX > 0.08 && relX < 0.14) {
+        const staffTop = top - height * 0.05;
+        const staffLen = height * 0.55;
+        // Staff shaft (dark wood/bone)
+        ctx.fillStyle = `rgb(${Math.floor(50*s)},${Math.floor(40*s)},${Math.floor(25*s)})`;
+        ctx.fillRect(x, staffTop, 1, staffLen);
+        // Glowing orb at top of staff
+        ctx.fillStyle = `rgba(100,255,120,${0.6*s})`;
+        ctx.fillRect(x, staffTop - height * 0.03, 1, height * 0.05);
+        // Orb glow
+        ctx.fillStyle = `rgba(150,255,170,${0.3*s})`;
+        ctx.fillRect(x, staffTop - height * 0.05, 1, height * 0.04);
+      }
+    }
+    // Right arm
+    if (relX > 0.78 && relX < 0.90) {
+      const armTop = top + height * 0.22;
+      const armLen = height * 0.25;
+      const r = Math.floor((28 + hf * 120) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(90*s)},${Math.floor(55*s)})`;
+      ctx.fillRect(x, armTop, 1, armLen);
+      // Clawed hand
+      ctx.fillStyle = `rgb(${Math.floor(20*s)},${Math.floor(70*s)},${Math.floor(40*s)})`;
+      ctx.fillRect(x, armTop + armLen, 1, height * 0.04);
+    }
+
+    // --- EXPANDED COBRA HOOD ---
+    if (relX > 0.10 && relX < 0.90) {
+      const hoodTop = top + height * 0.04;
+      const hoodBot = top + height * 0.35;
+      const hoodDist = Math.abs(relX - 0.5) / 0.40;
       const hoodCurve = 1 - hoodDist * hoodDist;
       if (hoodCurve > 0) {
         const hoodH = (hoodBot - hoodTop) * hoodCurve;
-        const r = Math.floor((35 + hf * 100) * s);
-        const g = Math.floor(135 * s);
-        const b = Math.floor(95 * s);
+        const r = Math.floor((32 + hf * 100) * s);
+        const g = Math.floor(128 * s);
+        const b = Math.floor(88 * s);
         ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
         ctx.fillRect(x, hoodBot - hoodH, 1, hoodH);
 
-        // Hood inner pattern (lighter V-shape / spectacle marking)
-        if (relX > 0.25 && relX < 0.75) {
-          const innerDist = Math.abs(relX - 0.5) / 0.25;
+        // Hood inner spectacle pattern
+        if (relX > 0.22 && relX < 0.78) {
+          const innerDist = Math.abs(relX - 0.5) / 0.28;
           if (innerDist < 1) {
-            ctx.fillStyle = `rgba(80,180,120,${(1-innerDist)*0.3*s})`;
+            ctx.fillStyle = `rgba(70,170,110,${(1-innerDist)*0.3*s})`;
             ctx.fillRect(x, hoodBot - hoodH * 0.7, 1, hoodH * 0.4);
           }
         }
 
-        // Hood edge highlight (golden rim)
-        if (hoodDist > 0.7 && hoodDist < 1) {
-          ctx.fillStyle = `rgba(200,180,60,${0.3*s})`;
+        // Hood edge (golden trim with scale detail)
+        if (hoodDist > 0.65 && hoodDist < 1) {
+          ctx.fillStyle = `rgba(190,170,55,${0.35*s})`;
           ctx.fillRect(x, hoodBot - hoodH, 1, hoodH * 0.5);
+          // Edge scales
+          const edgeScale = Math.floor(relX * 20) % 2;
+          if (edgeScale === 0) {
+            ctx.fillStyle = `rgba(160,145,45,${0.2*s})`;
+            ctx.fillRect(x, hoodBot - hoodH * 0.3, 1, hoodH * 0.2);
+          }
         }
       }
     }
 
-    // Face/head (center of hood)
-    if (relX > 0.35 && relX < 0.65) {
-      const faceTop = top + height * 0.12;
-      const faceBot = top + height * 0.28;
-      const r = Math.floor((30 + hf * 100) * s);
-      const g = Math.floor(100 * s);
-      const b = Math.floor(65 * s);
-      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+    // --- FACE/HEAD ---
+    if (relX > 0.34 && relX < 0.66) {
+      const faceTop = top + height * 0.11;
+      const faceBot = top + height * 0.26;
+      const r = Math.floor((28 + hf * 100) * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${Math.floor(95*s)},${Math.floor(60*s)})`;
       ctx.fillRect(x, faceTop, 1, faceBot - faceTop);
 
-      // Snout/nose
-      if (relX > 0.45 && relX < 0.55) {
-        ctx.fillStyle = `rgb(${Math.floor(25*s)},${Math.floor(80*s)},${Math.floor(50*s)})`;
+      // Snout
+      if (relX > 0.44 && relX < 0.56) {
+        ctx.fillStyle = `rgb(${Math.floor(22*s)},${Math.floor(75*s)},${Math.floor(45*s)})`;
         ctx.fillRect(x, faceBot - height * 0.03, 1, height * 0.04);
-        // Nostrils
-        if (relX > 0.47 && relX < 0.49 || relX > 0.51 && relX < 0.53) {
-          ctx.fillStyle = `rgb(${Math.floor(15*s)},${Math.floor(50*s)},${Math.floor(30*s)})`;
+        if ((relX > 0.46 && relX < 0.48) || (relX > 0.52 && relX < 0.54)) {
+          ctx.fillStyle = `rgb(${Math.floor(12*s)},${Math.floor(45*s)},${Math.floor(28*s)})`;
           ctx.fillRect(x, faceBot - height * 0.01, 1, height * 0.02);
         }
       }
     }
 
-    // Eyes (hypnotic, slit-pupil, glowing yellow-green)
+    // --- EYES (hypnotic, glowing yellow-green with slit pupils) ---
     if ((relX > 0.36 && relX < 0.44) || (relX > 0.56 && relX < 0.64)) {
-      const eyeY = top + height * 0.15;
-      const eyeH = height * 0.05;
-      // Eye glow
-      ctx.fillStyle = `rgba(200,255,50,${0.3*s})`;
-      ctx.fillRect(x, eyeY - height*0.01, 1, eyeH + height*0.02);
-      // Eye body (bright yellow-green)
+      const eyeY = top + height * 0.14;
+      const eyeH = height * 0.04;
+      ctx.fillStyle = `rgba(200,255,50,${0.35*s})`;
+      ctx.fillRect(x, eyeY - height * 0.01, 1, eyeH + height * 0.02);
       ctx.fillStyle = `rgb(${Math.floor(220*s)},${Math.floor(255*s)},${Math.floor(30*s)})`;
       ctx.fillRect(x, eyeY, 1, eyeH);
-      // Slit pupil
       if ((relX > 0.39 && relX < 0.41) || (relX > 0.59 && relX < 0.61)) {
-        ctx.fillStyle = `rgb(0,0,0)`;
+        ctx.fillStyle = 'rgb(0,0,0)';
         ctx.fillRect(x, eyeY + height * 0.005, 1, eyeH * 0.8);
       }
     }
 
-    // Forked tongue (flickering)
-    if (relX > 0.48 && relX < 0.52) {
-      const tongueY = top + height * 0.28;
+    // --- FORKED TONGUE ---
+    if (relX > 0.47 && relX < 0.53) {
+      const tongueY = top + height * 0.26;
       ctx.fillStyle = `rgb(${Math.floor(200*s)},${Math.floor(40*s)},${Math.floor(50*s)})`;
-      ctx.fillRect(x, tongueY, 1, height * 0.05);
+      ctx.fillRect(x, tongueY, 1, height * 0.04);
+      // Fork
+      if (relX < 0.49 || relX > 0.51) {
+        ctx.fillRect(x, tongueY + height * 0.035, 1, height * 0.02);
+      }
     }
 
-    // Crown jewel on hood (glowing gem between eyes)
-    if (relX > 0.46 && relX < 0.54) {
-      const gemY = top + height * 0.09;
-      ctx.fillStyle = `rgba(255,50,50,${0.5*s})`;
-      ctx.fillRect(x, gemY, 1, height * 0.035);
-      ctx.fillStyle = `rgba(255,150,150,${0.7*s})`;
-      ctx.fillRect(x, gemY + height * 0.01, 1, height * 0.015);
+    // --- CROWN JEWEL (Nagamani - glowing gem) ---
+    if (relX > 0.45 && relX < 0.55) {
+      const gemY = top + height * 0.08;
+      ctx.fillStyle = `rgba(255,50,50,${0.55*s})`;
+      ctx.fillRect(x, gemY, 1, height * 0.03);
+      ctx.fillStyle = `rgba(255,150,150,${0.75*s})`;
+      ctx.fillRect(x, gemY + height * 0.008, 1, height * 0.014);
+      // Gem glow aura
+      ctx.fillStyle = `rgba(255,80,80,${0.2*s})`;
+      ctx.fillRect(x, gemY - height * 0.01, 1, height * 0.05);
     }
   }
 

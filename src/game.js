@@ -56,6 +56,7 @@ class Game {
     this.shooting = false;
     this.fireCooldown = 0;
     this.projectiles = [];
+    this.enemyProjectiles = [];
 
     this.lastTime = 0;
     this.running = false;
@@ -165,6 +166,7 @@ class Game {
     this.gameState.paused = false;
     this.gameState.level = 1;
     this.projectiles = [];
+    this.enemyProjectiles = [];
     this.loadLevel(0);
   }
 
@@ -186,6 +188,7 @@ class Game {
     this.gameState.kills = 0;
     this.levelExit = level.exit;
     this.projectiles = [];
+    this.enemyProjectiles = [];
 
     // Give weapons on later levels
     if (index >= 1 && !this.gameState.weapons.includes('agni')) {
@@ -523,6 +526,9 @@ class Game {
   }
 
   updateEnemies(dt) {
+    // Initialize enemy projectiles array if needed
+    if (!this.enemyProjectiles) this.enemyProjectiles = [];
+
     for (const sprite of this.sprites) {
       if (!sprite.active || !sprite.health) continue;
 
@@ -537,6 +543,15 @@ class Game {
         sprite.attackCooldown -= dt;
       }
 
+      // Attack animation
+      if (sprite.attackAnim > 0) {
+        sprite.attackAnim -= dt * 3;
+        if (sprite.attackAnim < 0) sprite.attackAnim = 0;
+      }
+
+      // Walk animation
+      if (!sprite.walkAnim) sprite.walkAnim = 0;
+
       const dx = this.player.x - sprite.x;
       const dy = this.player.y - sprite.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -546,14 +561,43 @@ class Game {
       if (tileDist < sprite.alertRange || sprite.state === 'chase') {
         sprite.state = 'chase';
 
-        if (tileDist < sprite.attackRange) {
-          // Attack
+        // Ranged attack for naga (shoots energy bolts) and boss
+        const isRanged = sprite.type === 'naga' || sprite.boss;
+        const attackRange = isRanged ? Math.min(sprite.alertRange, 10) : sprite.attackRange;
+
+        if (tileDist < attackRange) {
           if (sprite.attackCooldown <= 0) {
-            this.takeDamage(sprite.damage, Math.atan2(-dy, -dx));
-            sprite.attackCooldown = sprite.boss ? 1.0 : 1.5;
-            this.sound.play('enemyAttack');
+            sprite.attackAnim = 1;
+            const angle = Math.atan2(dy, dx);
+
+            if (isRanged && tileDist > 1.5) {
+              // Shoot a visible projectile
+              this.enemyProjectiles.push({
+                x: sprite.x,
+                y: sprite.y,
+                angle: angle,
+                speed: (sprite.boss ? 5 : 4) * TILE_SIZE,
+                damage: sprite.damage * (sprite.boss ? 0.6 : 0.5),
+                traveled: 0,
+                maxRange: attackRange * TILE_SIZE,
+                type: sprite.type === 'naga' ? 'venom' : 'fire',
+                owner: sprite,
+              });
+              sprite.attackCooldown = sprite.boss ? 0.8 : 1.8;
+              this.sound.play('enemyAttack');
+            } else if (tileDist < sprite.attackRange) {
+              // Melee attack (asura sword slash, rakshasa mace smash)
+              this.takeDamage(sprite.damage, Math.atan2(-dy, -dx));
+              sprite.attackCooldown = sprite.boss ? 1.0 : 1.5;
+              this.sound.play('enemyAttack');
+            } else {
+              // Not in melee range and not ranged, just keep chasing
+              sprite.attackAnim = 0;
+            }
           }
-        } else {
+        }
+
+        if (tileDist > sprite.attackRange * 0.8) {
           // Move toward player
           const angle = Math.atan2(dy, dx);
           const moveSpeed = sprite.speed * TILE_SIZE * dt;
@@ -563,7 +607,39 @@ class Game {
           // Simple collision check for enemies
           if (!this.isWall(newX, sprite.y)) sprite.x = newX;
           if (!this.isWall(sprite.x, newY)) sprite.y = newY;
+
+          // Update walk animation
+          sprite.walkAnim += dt * 6;
         }
+      }
+    }
+
+    // Update enemy projectiles
+    for (let i = this.enemyProjectiles.length - 1; i >= 0; i--) {
+      const proj = this.enemyProjectiles[i];
+      const moveAmount = proj.speed * dt;
+      proj.x += Math.cos(proj.angle) * moveAmount;
+      proj.y += Math.sin(proj.angle) * moveAmount;
+      proj.traveled += moveAmount;
+
+      // Hit wall
+      if (this.isWall(proj.x, proj.y)) {
+        this.enemyProjectiles.splice(i, 1);
+        continue;
+      }
+
+      // Hit player
+      const pdx = proj.x - this.player.x;
+      const pdy = proj.y - this.player.y;
+      if (pdx * pdx + pdy * pdy < 20 * 20) {
+        this.takeDamage(proj.damage, Math.atan2(-pdy, -pdx));
+        this.enemyProjectiles.splice(i, 1);
+        continue;
+      }
+
+      // Max range
+      if (proj.traveled > proj.maxRange) {
+        this.enemyProjectiles.splice(i, 1);
       }
     }
   }
@@ -630,6 +706,59 @@ class Game {
     }
   }
 
+  renderProjectile3D(ctx, proj, w, h, colorMap, defaultColor, isEnemy) {
+    const dx = proj.x - this.player.x;
+    const dy = proj.y - this.player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx) - this.player.angle;
+    let norm = angle;
+    while (norm > Math.PI) norm -= 2 * Math.PI;
+    while (norm < -Math.PI) norm += 2 * Math.PI;
+
+    if (Math.abs(norm) < HALF_FOV && dist < TILE_SIZE * 15) {
+      const screenX = (0.5 + norm / FOV) * w;
+      const size = Math.max(4, (isEnemy ? 25 : 20) - dist / TILE_SIZE * 2);
+      const color = colorMap[proj.type] || defaultColor;
+
+      // Main projectile body
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(screenX, h / 2, size, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Bright core
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.arc(screenX, h / 2, size * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Outer glow
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.25;
+      ctx.beginPath();
+      ctx.arc(screenX, h / 2, size * 2.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+
+      // Trail effect (for enemy projectiles, draw a fading trail)
+      if (isEnemy) {
+        const trailAngle = proj.angle + Math.PI;
+        for (let t = 1; t <= 3; t++) {
+          const tx = screenX + Math.cos(norm) * t * size * 0.8;
+          const trailSize = size * (1 - t * 0.25);
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.15 / t;
+          ctx.beginPath();
+          ctx.arc(tx, h / 2, trailSize, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
   render() {
     const ctx = this.engine.ctx;
     const w = this.canvas.width;
@@ -638,34 +767,46 @@ class Game {
     // Main 3D view
     this.engine.render(this.player, this.map, this.sprites, this.gameState);
 
-    // Render projectiles as screen flashes (they're fast)
+    // Render player projectiles
     for (const proj of this.projectiles) {
-      const dx = proj.x - this.player.x;
-      const dy = proj.y - this.player.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const angle = Math.atan2(dy, dx) - this.player.angle;
-      let norm = angle;
-      while (norm > Math.PI) norm -= 2 * Math.PI;
-      while (norm < -Math.PI) norm += 2 * Math.PI;
+      this.renderProjectile3D(ctx, proj, w, h, {
+        chakra: '#ffdd00',
+        brahmastra: '#cc00ff',
+      }, '#ff8800');
+    }
 
-      if (Math.abs(norm) < HALF_FOV && dist < TILE_SIZE * 15) {
-        const screenX = (0.5 + norm / FOV) * w;
-        const size = Math.max(4, 20 - dist / TILE_SIZE * 2);
-        const colors = {
-          chakra: '#ffdd00',
-          brahmastra: '#cc00ff',
-        };
-        ctx.fillStyle = colors[proj.type] || '#ff8800';
-        ctx.beginPath();
-        ctx.arc(screenX, h / 2, size, 0, Math.PI * 2);
-        ctx.fill();
+    // Render enemy projectiles (visible fireballs/venom bolts!)
+    if (this.enemyProjectiles) {
+      for (const proj of this.enemyProjectiles) {
+        this.renderProjectile3D(ctx, proj, w, h, {
+          venom: '#44ff66',
+          fire: '#ff4400',
+        }, '#ff6600', true);
+      }
+    }
 
-        // Glow
-        ctx.globalAlpha = 0.3;
-        ctx.beginPath();
-        ctx.arc(screenX, h / 2, size * 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
+    // Damage direction indicator (shows where enemy shots come from)
+    if (this.enemyProjectiles && this.enemyProjectiles.length > 0) {
+      for (const proj of this.enemyProjectiles) {
+        const pdx = proj.x - this.player.x;
+        const pdy = proj.y - this.player.y;
+        const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
+        if (pdist < TILE_SIZE * 4) {
+          // Close projectile warning flash on edges of screen
+          const projAngle = Math.atan2(pdy, pdx) - this.player.angle;
+          let normA = projAngle;
+          while (normA > Math.PI) normA -= 2 * Math.PI;
+          while (normA < -Math.PI) normA += 2 * Math.PI;
+          const warnAlpha = Math.max(0, 0.15 * (1 - pdist / (TILE_SIZE * 4)));
+          const warnColor = proj.type === 'venom' ? `rgba(0,255,80,${warnAlpha})` : `rgba(255,80,0,${warnAlpha})`;
+          if (normA < -0.3) {
+            ctx.fillStyle = warnColor;
+            ctx.fillRect(0, 0, 20, h);
+          } else if (normA > 0.3) {
+            ctx.fillStyle = warnColor;
+            ctx.fillRect(w - 20, 0, 20, h);
+          }
+        }
       }
     }
 
