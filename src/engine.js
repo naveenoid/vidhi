@@ -158,37 +158,45 @@ class RaycastEngine {
   getWallColor(texture, isHorizontal, shade, texX) {
     const darkFactor = isHorizontal ? 0.7 : 1;
     const s = shade * darkFactor;
+    // Add subtle texture variation based on texX position
+    const tv = Math.sin(texX * 37.7) * 0.08; // pseudo-random variation per column
 
     switch (texture) {
-      case 1: // Temple stone walls
+      case 1: // Temple stone walls - warm sandstone with mortar lines
         return {
-          main: `rgb(${Math.floor(180 * s)}, ${Math.floor(140 * s)}, ${Math.floor(100 * s)})`,
-          detail: `rgb(${Math.floor(140 * s)}, ${Math.floor(100 * s)}, ${Math.floor(70 * s)})`
+          main: `rgb(${Math.floor((175 + tv * 40) * s)}, ${Math.floor((138 + tv * 30) * s)}, ${Math.floor((95 + tv * 20) * s)})`,
+          detail: `rgb(${Math.floor(110 * s)}, ${Math.floor(85 * s)}, ${Math.floor(55 * s)})`,
+          accent: `rgb(${Math.floor(200 * s)}, ${Math.floor(160 * s)}, ${Math.floor(110 * s)})`
         };
-      case 2: // Red/terracotta walls (Dravidian temple)
+      case 2: // Red/terracotta walls (Dravidian temple) - rich red clay with carved details
         return {
-          main: `rgb(${Math.floor(200 * s)}, ${Math.floor(80 * s)}, ${Math.floor(60 * s)})`,
-          detail: `rgb(${Math.floor(160 * s)}, ${Math.floor(60 * s)}, ${Math.floor(40 * s)})`
+          main: `rgb(${Math.floor((195 + tv * 30) * s)}, ${Math.floor((75 + tv * 20) * s)}, ${Math.floor((55 + tv * 15) * s)})`,
+          detail: `rgb(${Math.floor(130 * s)}, ${Math.floor(45 * s)}, ${Math.floor(30 * s)})`,
+          accent: `rgb(${Math.floor(220 * s)}, ${Math.floor(100 * s)}, ${Math.floor(70 * s)})`
         };
-      case 3: // Dark stone / dungeon
+      case 3: // Dark stone / dungeon - cold, mossy stone blocks
         return {
-          main: `rgb(${Math.floor(90 * s)}, ${Math.floor(90 * s)}, ${Math.floor(100 * s)})`,
-          detail: `rgb(${Math.floor(60 * s)}, ${Math.floor(60 * s)}, ${Math.floor(70 * s)})`
+          main: `rgb(${Math.floor((85 + tv * 20) * s)}, ${Math.floor((88 + tv * 25) * s)}, ${Math.floor((95 + tv * 15) * s)})`,
+          detail: `rgb(${Math.floor(50 * s)}, ${Math.floor(55 * s)}, ${Math.floor(60 * s)})`,
+          accent: `rgb(${Math.floor(70 * s)}, ${Math.floor(90 * s)}, ${Math.floor(75 * s)})`
         };
-      case 4: // Gold/ornate walls
+      case 4: // Gold/ornate walls - polished gold with engraved patterns
         return {
-          main: `rgb(${Math.floor(220 * s)}, ${Math.floor(180 * s)}, ${Math.floor(50 * s)})`,
-          detail: `rgb(${Math.floor(180 * s)}, ${Math.floor(140 * s)}, ${Math.floor(30 * s)})`
+          main: `rgb(${Math.floor((215 + tv * 25) * s)}, ${Math.floor((178 + tv * 20) * s)}, ${Math.floor((48 + tv * 15) * s)})`,
+          detail: `rgb(${Math.floor(160 * s)}, ${Math.floor(120 * s)}, ${Math.floor(20 * s)})`,
+          accent: `rgb(${Math.floor(245 * s)}, ${Math.floor(210 * s)}, ${Math.floor(80 * s)})`
         };
-      case 5: // Door
+      case 5: // Door - heavy carved wood with metal bands
         return {
-          main: `rgb(${Math.floor(120 * s)}, ${Math.floor(60 * s)}, ${Math.floor(30 * s)})`,
-          detail: `rgb(${Math.floor(90 * s)}, ${Math.floor(40 * s)}, ${Math.floor(20 * s)})`
+          main: `rgb(${Math.floor((115 + tv * 20) * s)}, ${Math.floor((58 + tv * 15) * s)}, ${Math.floor((28 + tv * 10) * s)})`,
+          detail: `rgb(${Math.floor(70 * s)}, ${Math.floor(35 * s)}, ${Math.floor(15 * s)})`,
+          accent: `rgb(${Math.floor(160 * s)}, ${Math.floor(130 * s)}, ${Math.floor(40 * s)})`
         };
       default:
         return {
           main: `rgb(${Math.floor(150 * s)}, ${Math.floor(150 * s)}, ${Math.floor(150 * s)})`,
-          detail: `rgb(${Math.floor(120 * s)}, ${Math.floor(120 * s)}, ${Math.floor(120 * s)})`
+          detail: `rgb(${Math.floor(120 * s)}, ${Math.floor(120 * s)}, ${Math.floor(120 * s)})`,
+          accent: `rgb(${Math.floor(170 * s)}, ${Math.floor(170 * s)}, ${Math.floor(170 * s)})`
         };
     }
   }
@@ -263,89 +271,423 @@ class RaycastEngine {
   }
 
   drawAsuraColumn(ctx, x, top, height, relX, shade, sprite) {
-    // Asura demon - red/dark body
-    const bodyStart = top + height * 0.15;
-    const bodyEnd = top + height;
-    const headEnd = top + height * 0.15;
+    // Asura demon - muscular red demon with horns, fangs, and glowing eyes
+    const hurtFlash = sprite.hurt ? 0.6 : 0;
+    const s = shade;
 
-    // Body
-    if (relX > 0.2 && relX < 0.8) {
-      const r = Math.floor((180 + (sprite.hurt ? 75 : 0)) * shade);
-      const g = Math.floor(40 * shade);
-      const b = Math.floor(40 * shade);
-      ctx.fillStyle = `rgb(${Math.min(255, r)},${g},${b})`;
-      ctx.fillRect(x, bodyStart, 1, bodyEnd - bodyStart);
+    // Legs (two separate legs with gap)
+    if (relX > 0.25 && relX < 0.42) {
+      // Left leg
+      const legTop = top + height * 0.65;
+      const r = Math.floor((140 + hurtFlash * 115) * s);
+      const g = Math.floor(30 * s);
+      const b = Math.floor(25 * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+      ctx.fillRect(x, legTop, 1, height * 0.35);
+      // Knee highlight
+      if (relX > 0.30 && relX < 0.37) {
+        ctx.fillStyle = `rgba(255,100,60,${0.15 * s})`;
+        ctx.fillRect(x, legTop + height * 0.12, 1, height * 0.06);
+      }
+    }
+    if (relX > 0.58 && relX < 0.75) {
+      // Right leg
+      const legTop = top + height * 0.65;
+      const r = Math.floor((140 + hurtFlash * 115) * s);
+      const g = Math.floor(30 * s);
+      const b = Math.floor(25 * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+      ctx.fillRect(x, legTop, 1, height * 0.35);
     }
 
-    // Head
-    if (relX > 0.3 && relX < 0.7) {
-      ctx.fillStyle = `rgb(${Math.floor(200 * shade)},${Math.floor(60 * shade)},${Math.floor(60 * shade)})`;
-      ctx.fillRect(x, top, 1, headEnd - top);
+    // Torso (muscular, wider at shoulders tapering to waist)
+    if (relX > (0.5 - 0.18) && relX < (0.5 + 0.18)) {
+      const torsoTop = top + height * 0.22;
+      const torsoBot = top + height * 0.65;
+      const r = Math.floor((170 + hurtFlash * 85) * s);
+      const g = Math.floor(35 * s);
+      const b = Math.floor(30 * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+      ctx.fillRect(x, torsoTop, 1, torsoBot - torsoTop);
+
+      // Chest muscle highlights
+      if (relX > 0.38 && relX < 0.48) {
+        ctx.fillStyle = `rgba(220,70,50,${0.25 * s})`;
+        ctx.fillRect(x, torsoTop + height * 0.05, 1, height * 0.1);
+      }
+      if (relX > 0.52 && relX < 0.62) {
+        ctx.fillStyle = `rgba(220,70,50,${0.25 * s})`;
+        ctx.fillRect(x, torsoTop + height * 0.05, 1, height * 0.1);
+      }
+      // Belt/waist band
+      ctx.fillStyle = `rgb(${Math.floor(80*s)},${Math.floor(50*s)},${Math.floor(20*s)})`;
+      ctx.fillRect(x, top + height * 0.6, 1, height * 0.04);
     }
 
-    // Eyes
-    if (relX > 0.35 && relX < 0.42 || relX > 0.58 && relX < 0.65) {
-      ctx.fillStyle = `rgb(255,${Math.floor(200 * shade)},0)`;
-      ctx.fillRect(x, top + height * 0.06, 1, height * 0.04);
+    // Arms (extending out from shoulders)
+    if ((relX > 0.12 && relX < 0.28) || (relX > 0.72 && relX < 0.88)) {
+      const armTop = top + height * 0.25;
+      const armLen = height * 0.35;
+      const r = Math.floor((155 + hurtFlash * 100) * s);
+      const g = Math.floor(30 * s);
+      const b = Math.floor(28 * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+      ctx.fillRect(x, armTop, 1, armLen);
+      // Clawed hands
+      if (relX < 0.18 || relX > 0.82) {
+        ctx.fillStyle = `rgb(${Math.floor(100*s)},${Math.floor(20*s)},${Math.floor(15*s)})`;
+        ctx.fillRect(x, armTop + armLen, 1, height * 0.06);
+      }
+    }
+
+    // Shoulders (broad shoulder pads)
+    if (relX > 0.18 && relX < 0.82) {
+      const shStart = top + height * 0.2;
+      const shH = height * 0.06;
+      if ((relX > 0.18 && relX < 0.35) || (relX > 0.65 && relX < 0.82)) {
+        const r = Math.floor((190 + hurtFlash * 65) * s);
+        const g = Math.floor(45 * s);
+        const b = Math.floor(35 * s);
+        ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+        ctx.fillRect(x, shStart, 1, shH);
+      }
+    }
+
+    // Head (rounded, with strong jawline)
+    if (relX > 0.32 && relX < 0.68) {
+      const headTop = top + height * 0.06;
+      const headBot = top + height * 0.22;
+      // Widen in middle of head
+      const headDist = Math.abs(relX - 0.5) / 0.18;
+      if (headDist < 1) {
+        const r = Math.floor((200 + hurtFlash * 55) * s);
+        const g = Math.floor(55 * s);
+        const b = Math.floor(45 * s);
+        ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+        ctx.fillRect(x, headTop, 1, headBot - headTop);
+      }
+    }
+
+    // Horns (curved upward from head)
+    if ((relX > 0.26 && relX < 0.35) || (relX > 0.65 && relX < 0.74)) {
+      const hornTop = top;
+      const hornBot = top + height * 0.1;
+      const r = Math.floor(60 * s);
+      const g = Math.floor(50 * s);
+      const b = Math.floor(30 * s);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(x, hornTop, 1, hornBot - hornTop);
+      // Horn tip glow
+      ctx.fillStyle = `rgba(255,120,40,${0.4 * s})`;
+      ctx.fillRect(x, hornTop, 1, height * 0.02);
+    }
+
+    // Eyes (glowing orange-yellow, menacing)
+    if ((relX > 0.37 && relX < 0.44) || (relX > 0.56 && relX < 0.63)) {
+      const eyeY = top + height * 0.1;
+      const eyeH = height * 0.04;
+      // Eye glow aura
+      ctx.fillStyle = `rgba(255,200,0,${0.3 * s})`;
+      ctx.fillRect(x, eyeY - height * 0.01, 1, eyeH + height * 0.02);
+      // Eye core
+      ctx.fillStyle = `rgb(255,${Math.floor(180 * s)},0)`;
+      ctx.fillRect(x, eyeY, 1, eyeH);
+      // Pupil
+      if ((relX > 0.39 && relX < 0.42) || (relX > 0.58 && relX < 0.61)) {
+        ctx.fillStyle = `rgb(${Math.floor(200*s)},0,0)`;
+        ctx.fillRect(x, eyeY + height * 0.01, 1, eyeH * 0.5);
+      }
+    }
+
+    // Mouth/fangs
+    if (relX > 0.40 && relX < 0.60) {
+      const mouthY = top + height * 0.16;
+      ctx.fillStyle = `rgb(${Math.floor(40*s)},0,0)`;
+      ctx.fillRect(x, mouthY, 1, height * 0.03);
+      // Fangs
+      if ((relX > 0.42 && relX < 0.45) || (relX > 0.55 && relX < 0.58)) {
+        ctx.fillStyle = `rgb(${Math.floor(230*s)},${Math.floor(220*s)},${Math.floor(200*s)})`;
+        ctx.fillRect(x, mouthY + height * 0.02, 1, height * 0.025);
+      }
     }
   }
 
   drawRakshasaColumn(ctx, x, top, height, relX, shade, sprite) {
-    // Rakshasa - larger, darker, more menacing
-    const bodyStart = top + height * 0.2;
-    const bodyEnd = top + height;
+    // Rakshasa - massive hulking purple-black demon with three eyes, heavy armor, and huge horns
+    const s = shade;
+    const hf = sprite.hurt ? 0.7 : 0;
 
+    // Legs (thick, trunk-like)
+    if ((relX > 0.18 && relX < 0.38) || (relX > 0.62 && relX < 0.82)) {
+      const legTop = top + height * 0.62;
+      const r = Math.floor((80 + hf * 120) * s);
+      const g = Math.floor(40 * s);
+      const b = Math.floor(65 * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+      ctx.fillRect(x, legTop, 1, height * 0.38);
+      // Armored shin guards
+      if ((relX > 0.22 && relX < 0.34) || (relX > 0.66 && relX < 0.78)) {
+        ctx.fillStyle = `rgb(${Math.floor(50*s)},${Math.floor(45*s)},${Math.floor(55*s)})`;
+        ctx.fillRect(x, legTop + height * 0.18, 1, height * 0.15);
+        // Metal highlight
+        ctx.fillStyle = `rgba(140,130,160,${0.2*s})`;
+        ctx.fillRect(x, legTop + height * 0.22, 1, height * 0.03);
+      }
+    }
+
+    // Massive torso with armor plates
     if (relX > 0.15 && relX < 0.85) {
-      const r = Math.floor((100 + (sprite.hurt ? 100 : 0)) * shade);
-      const g = Math.floor(50 * shade);
-      const b = Math.floor(80 * shade);
-      ctx.fillStyle = `rgb(${Math.min(255, r)},${g},${b})`;
-      ctx.fillRect(x, bodyStart, 1, bodyEnd - bodyStart);
+      const torsoTop = top + height * 0.2;
+      const torsoBot = top + height * 0.64;
+      // Torso tapers: widest at chest
+      const distFromCenter = Math.abs(relX - 0.5);
+      const maxW = (relX > 0.15 && relX < 0.85) ? 0.35 : 0;
+      if (distFromCenter < maxW) {
+        const r = Math.floor((90 + hf * 110) * s);
+        const g = Math.floor(45 * s);
+        const b = Math.floor(75 * s);
+        ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+        ctx.fillRect(x, torsoTop, 1, torsoBot - torsoTop);
+      }
     }
 
-    // Horns
-    if ((relX > 0.25 && relX < 0.35) || (relX > 0.65 && relX < 0.75)) {
-      ctx.fillStyle = `rgb(${Math.floor(60 * shade)},${Math.floor(60 * shade)},${Math.floor(40 * shade)})`;
-      ctx.fillRect(x, top, 1, height * 0.2);
+    // Chest armor plate (dark metal)
+    if (relX > 0.25 && relX < 0.75) {
+      const plateTop = top + height * 0.25;
+      ctx.fillStyle = `rgb(${Math.floor(45*s)},${Math.floor(40*s)},${Math.floor(55*s)})`;
+      ctx.fillRect(x, plateTop, 1, height * 0.2);
+      // Armor rivets/detail
+      if (relX > 0.35 && relX < 0.65) {
+        ctx.fillStyle = `rgba(180,160,200,${0.15*s})`;
+        ctx.fillRect(x, plateTop + height * 0.05, 1, height * 0.02);
+        ctx.fillRect(x, plateTop + height * 0.12, 1, height * 0.02);
+      }
+      // Skull emblem on chest
+      if (relX > 0.42 && relX < 0.58) {
+        ctx.fillStyle = `rgba(200,180,220,${0.25*s})`;
+        ctx.fillRect(x, plateTop + height * 0.07, 1, height * 0.06);
+      }
     }
 
-    // Head
-    if (relX > 0.3 && relX < 0.7) {
-      ctx.fillStyle = `rgb(${Math.floor(120 * shade)},${Math.floor(40 * shade)},${Math.floor(70 * shade)})`;
-      ctx.fillRect(x, top + height * 0.1, 1, height * 0.12);
+    // Arms (massive, with spiked bracers)
+    if ((relX > 0.05 && relX < 0.2) || (relX > 0.8 && relX < 0.95)) {
+      const armTop = top + height * 0.22;
+      const armLen = height * 0.4;
+      const r = Math.floor((85 + hf * 120) * s);
+      const g = Math.floor(42 * s);
+      const b = Math.floor(70 * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+      ctx.fillRect(x, armTop, 1, armLen);
+      // Spiked bracers
+      ctx.fillStyle = `rgb(${Math.floor(50*s)},${Math.floor(50*s)},${Math.floor(50*s)})`;
+      ctx.fillRect(x, armTop + height * 0.15, 1, height * 0.08);
+      // Clawed fists
+      ctx.fillStyle = `rgb(${Math.floor(60*s)},${Math.floor(30*s)},${Math.floor(45*s)})`;
+      ctx.fillRect(x, armTop + armLen, 1, height * 0.08);
+      // Claw tips
+      if (relX < 0.12 || relX > 0.88) {
+        ctx.fillStyle = `rgb(${Math.floor(200*s)},${Math.floor(190*s)},${Math.floor(170*s)})`;
+        ctx.fillRect(x, armTop + armLen + height * 0.06, 1, height * 0.04);
+      }
     }
 
-    // Eyes (three eyes)
-    if ((relX > 0.35 && relX < 0.40) || (relX > 0.48 && relX < 0.52) || (relX > 0.60 && relX < 0.65)) {
-      ctx.fillStyle = '#ff0000';
-      ctx.fillRect(x, top + height * 0.14, 1, height * 0.03);
+    // Head (wide, brutish)
+    if (relX > 0.28 && relX < 0.72) {
+      const headTop = top + height * 0.08;
+      const headBot = top + height * 0.22;
+      const r = Math.floor((110 + hf * 90) * s);
+      const g = Math.floor(40 * s);
+      const b = Math.floor(70 * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+      ctx.fillRect(x, headTop, 1, headBot - headTop);
+      // Brow ridge (darker strip)
+      ctx.fillStyle = `rgb(${Math.floor(70*s)},${Math.floor(25*s)},${Math.floor(50*s)})`;
+      ctx.fillRect(x, headTop + height * 0.06, 1, height * 0.02);
+    }
+
+    // Huge curved horns
+    if ((relX > 0.15 && relX < 0.32) || (relX > 0.68 && relX < 0.85)) {
+      const hornBot = top + height * 0.12;
+      const hornH = height * 0.12;
+      // Outer horn base (dark bone)
+      ctx.fillStyle = `rgb(${Math.floor(70*s)},${Math.floor(60*s)},${Math.floor(40*s)})`;
+      ctx.fillRect(x, hornBot - hornH, 1, hornH);
+      // Horn ridges
+      ctx.fillStyle = `rgb(${Math.floor(90*s)},${Math.floor(80*s)},${Math.floor(55*s)})`;
+      ctx.fillRect(x, hornBot - hornH + height * 0.03, 1, height * 0.015);
+      // Horn tip (sharp, lighter)
+      if ((relX > 0.15 && relX < 0.22) || (relX > 0.78 && relX < 0.85)) {
+        ctx.fillStyle = `rgb(${Math.floor(120*s)},${Math.floor(110*s)},${Math.floor(80*s)})`;
+        ctx.fillRect(x, top, 1, height * 0.04);
+      }
+    }
+
+    // Three eyes (glowing red, the middle one on forehead)
+    // Left eye
+    if (relX > 0.33 && relX < 0.41) {
+      ctx.fillStyle = `rgba(255,50,0,${0.3*s})`;
+      ctx.fillRect(x, top + height * 0.12, 1, height * 0.05);
+      ctx.fillStyle = `rgb(255,${Math.floor(30*s)},0)`;
+      ctx.fillRect(x, top + height * 0.13, 1, height * 0.03);
+    }
+    // Right eye
+    if (relX > 0.59 && relX < 0.67) {
+      ctx.fillStyle = `rgba(255,50,0,${0.3*s})`;
+      ctx.fillRect(x, top + height * 0.12, 1, height * 0.05);
+      ctx.fillStyle = `rgb(255,${Math.floor(30*s)},0)`;
+      ctx.fillRect(x, top + height * 0.13, 1, height * 0.03);
+    }
+    // Third eye (forehead, larger, brighter)
+    if (relX > 0.45 && relX < 0.55) {
+      ctx.fillStyle = `rgba(255,80,0,${0.4*s})`;
+      ctx.fillRect(x, top + height * 0.085, 1, height * 0.05);
+      ctx.fillStyle = `rgb(255,${Math.floor(100*s)},0)`;
+      ctx.fillRect(x, top + height * 0.095, 1, height * 0.03);
+    }
+
+    // Mouth/jaw (wide gaping maw with tusks)
+    if (relX > 0.35 && relX < 0.65) {
+      ctx.fillStyle = `rgb(${Math.floor(30*s)},0,${Math.floor(10*s)})`;
+      ctx.fillRect(x, top + height * 0.17, 1, height * 0.04);
+      // Tusks (upward curving from lower jaw)
+      if ((relX > 0.36 && relX < 0.40) || (relX > 0.60 && relX < 0.64)) {
+        ctx.fillStyle = `rgb(${Math.floor(220*s)},${Math.floor(210*s)},${Math.floor(180*s)})`;
+        ctx.fillRect(x, top + height * 0.15, 1, height * 0.04);
+      }
     }
   }
 
   drawNagaColumn(ctx, x, top, height, relX, shade, sprite) {
-    // Naga serpent - green/blue body
-    const bodyWidth = 0.3 + 0.2 * Math.sin(relX * Math.PI);
+    // Naga - majestic cobra serpent with expanded hood, scales, and hypnotic eyes
+    const s = shade;
+    const hf = sprite.hurt ? 0.6 : 0;
 
-    if (relX > (0.5 - bodyWidth / 2) && relX < (0.5 + bodyWidth / 2)) {
-      const r = Math.floor((30 + (sprite.hurt ? 100 : 0)) * shade);
-      const g = Math.floor(120 * shade);
-      const b = Math.floor(80 * shade);
-      ctx.fillStyle = `rgb(${Math.min(255, r)},${g},${b})`;
-      ctx.fillRect(x, top + height * 0.1, 1, height * 0.9);
+    // Serpentine body (sinuous, narrowing downward with scale pattern)
+    const bodyCenter = 0.5;
+    const bodyHalfW = 0.12 + 0.04 * Math.sin(relX * Math.PI * 3);
+    if (relX > (bodyCenter - bodyHalfW) && relX < (bodyCenter + bodyHalfW)) {
+      const bodyTop = top + height * 0.35;
+      const bodyBot = top + height;
+      const r = Math.floor((25 + hf * 130) * s);
+      const g = Math.floor(110 * s);
+      const b = Math.floor(70 * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+      ctx.fillRect(x, bodyTop, 1, bodyBot - bodyTop);
+
+      // Scale pattern (diamond-shaped highlights)
+      const scalePhase = Math.floor(relX * 20) % 2;
+      if (scalePhase === 0) {
+        ctx.fillStyle = `rgba(60,150,100,${0.3*s})`;
+        for (let sy = bodyTop; sy < bodyBot; sy += height * 0.08) {
+          ctx.fillRect(x, sy, 1, height * 0.03);
+        }
+      }
+
+      // Belly (lighter center stripe)
+      if (Math.abs(relX - 0.5) < 0.05) {
+        ctx.fillStyle = `rgba(120,200,140,${0.2*s})`;
+        ctx.fillRect(x, bodyTop, 1, bodyBot - bodyTop);
+      }
     }
 
-    // Hood
-    if (relX > 0.2 && relX < 0.8 && relX > 0.2) {
-      const hoodY = top;
-      const hoodH = height * 0.25;
-      ctx.fillStyle = `rgb(${Math.floor(40 * shade)},${Math.floor(140 * shade)},${Math.floor(100 * shade)})`;
-      ctx.fillRect(x, hoodY, 1, hoodH);
+    // Tail coil at bottom (wider base suggesting coiled body)
+    if (relX > 0.3 && relX < 0.7) {
+      const coilTop = top + height * 0.85;
+      const coilDist = Math.abs(relX - 0.5) / 0.2;
+      if (coilDist < 1) {
+        const r = Math.floor((20 + hf * 100) * s);
+        const g = Math.floor(90 * s);
+        const b = Math.floor(55 * s);
+        ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+        ctx.fillRect(x, coilTop, 1, height * 0.15);
+      }
     }
 
-    // Eyes
-    if ((relX > 0.35 && relX < 0.42) || (relX > 0.58 && relX < 0.65)) {
-      ctx.fillStyle = `rgb(${Math.floor(255 * shade)},${Math.floor(255 * shade)},0)`;
-      ctx.fillRect(x, top + height * 0.08, 1, height * 0.04);
+    // Expanded cobra hood (wide, flattened, with markings)
+    if (relX > 0.12 && relX < 0.88) {
+      const hoodTop = top + height * 0.05;
+      const hoodBot = top + height * 0.38;
+      // Hood shape: wider in middle, narrow at edges
+      const hoodDist = Math.abs(relX - 0.5) / 0.38;
+      const hoodCurve = 1 - hoodDist * hoodDist;
+      if (hoodCurve > 0) {
+        const hoodH = (hoodBot - hoodTop) * hoodCurve;
+        const r = Math.floor((35 + hf * 100) * s);
+        const g = Math.floor(135 * s);
+        const b = Math.floor(95 * s);
+        ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+        ctx.fillRect(x, hoodBot - hoodH, 1, hoodH);
+
+        // Hood inner pattern (lighter V-shape / spectacle marking)
+        if (relX > 0.25 && relX < 0.75) {
+          const innerDist = Math.abs(relX - 0.5) / 0.25;
+          if (innerDist < 1) {
+            ctx.fillStyle = `rgba(80,180,120,${(1-innerDist)*0.3*s})`;
+            ctx.fillRect(x, hoodBot - hoodH * 0.7, 1, hoodH * 0.4);
+          }
+        }
+
+        // Hood edge highlight (golden rim)
+        if (hoodDist > 0.7 && hoodDist < 1) {
+          ctx.fillStyle = `rgba(200,180,60,${0.3*s})`;
+          ctx.fillRect(x, hoodBot - hoodH, 1, hoodH * 0.5);
+        }
+      }
+    }
+
+    // Face/head (center of hood)
+    if (relX > 0.35 && relX < 0.65) {
+      const faceTop = top + height * 0.12;
+      const faceBot = top + height * 0.28;
+      const r = Math.floor((30 + hf * 100) * s);
+      const g = Math.floor(100 * s);
+      const b = Math.floor(65 * s);
+      ctx.fillStyle = `rgb(${Math.min(255,r)},${g},${b})`;
+      ctx.fillRect(x, faceTop, 1, faceBot - faceTop);
+
+      // Snout/nose
+      if (relX > 0.45 && relX < 0.55) {
+        ctx.fillStyle = `rgb(${Math.floor(25*s)},${Math.floor(80*s)},${Math.floor(50*s)})`;
+        ctx.fillRect(x, faceBot - height * 0.03, 1, height * 0.04);
+        // Nostrils
+        if (relX > 0.47 && relX < 0.49 || relX > 0.51 && relX < 0.53) {
+          ctx.fillStyle = `rgb(${Math.floor(15*s)},${Math.floor(50*s)},${Math.floor(30*s)})`;
+          ctx.fillRect(x, faceBot - height * 0.01, 1, height * 0.02);
+        }
+      }
+    }
+
+    // Eyes (hypnotic, slit-pupil, glowing yellow-green)
+    if ((relX > 0.36 && relX < 0.44) || (relX > 0.56 && relX < 0.64)) {
+      const eyeY = top + height * 0.15;
+      const eyeH = height * 0.05;
+      // Eye glow
+      ctx.fillStyle = `rgba(200,255,50,${0.3*s})`;
+      ctx.fillRect(x, eyeY - height*0.01, 1, eyeH + height*0.02);
+      // Eye body (bright yellow-green)
+      ctx.fillStyle = `rgb(${Math.floor(220*s)},${Math.floor(255*s)},${Math.floor(30*s)})`;
+      ctx.fillRect(x, eyeY, 1, eyeH);
+      // Slit pupil
+      if ((relX > 0.39 && relX < 0.41) || (relX > 0.59 && relX < 0.61)) {
+        ctx.fillStyle = `rgb(0,0,0)`;
+        ctx.fillRect(x, eyeY + height * 0.005, 1, eyeH * 0.8);
+      }
+    }
+
+    // Forked tongue (flickering)
+    if (relX > 0.48 && relX < 0.52) {
+      const tongueY = top + height * 0.28;
+      ctx.fillStyle = `rgb(${Math.floor(200*s)},${Math.floor(40*s)},${Math.floor(50*s)})`;
+      ctx.fillRect(x, tongueY, 1, height * 0.05);
+    }
+
+    // Crown jewel on hood (glowing gem between eyes)
+    if (relX > 0.46 && relX < 0.54) {
+      const gemY = top + height * 0.09;
+      ctx.fillStyle = `rgba(255,50,50,${0.5*s})`;
+      ctx.fillRect(x, gemY, 1, height * 0.035);
+      ctx.fillStyle = `rgba(255,150,150,${0.7*s})`;
+      ctx.fillRect(x, gemY + height * 0.01, 1, height * 0.015);
     }
   }
 
@@ -421,104 +763,409 @@ class RaycastEngine {
   }
 
   drawTrishul(ctx, x, y, gs) {
-    // Trishul (trident) - starting weapon
-    ctx.fillStyle = '#888899';
-    ctx.fillRect(x + 55, y + 40, 6, 140); // shaft
+    // Trishul (Shiva's trident) - ornate divine weapon
+    const cx = x + 58;
 
-    // Three prongs
-    ctx.fillStyle = '#aabbcc';
-    ctx.fillRect(x + 56, y, 4, 50); // center
-    ctx.fillRect(x + 40, y + 10, 4, 40); // left
-    ctx.fillRect(x + 72, y + 10, 4, 40); // right
+    // Shaft - wooden with metallic wrap
+    const shaftGrad = ctx.createLinearGradient(cx - 5, y + 50, cx + 5, y + 50);
+    shaftGrad.addColorStop(0, '#665544');
+    shaftGrad.addColorStop(0.3, '#998877');
+    shaftGrad.addColorStop(0.5, '#aa9988');
+    shaftGrad.addColorStop(0.7, '#998877');
+    shaftGrad.addColorStop(1, '#554433');
+    ctx.fillStyle = shaftGrad;
+    ctx.fillRect(cx - 4, y + 35, 8, 145);
 
-    // Prong tips
-    ctx.fillStyle = '#ccddff';
-    for (const px of [40, 56, 72]) {
-      ctx.beginPath();
-      ctx.moveTo(x + px, y + (px === 56 ? -10 : 0));
-      ctx.lineTo(x + px + 6, y + (px === 56 ? -10 : 0));
-      ctx.lineTo(x + px + 3, y + (px === 56 ? -20 : -10));
-      ctx.fill();
+    // Metal bands on shaft
+    for (let i = 0; i < 4; i++) {
+      const bandY = y + 55 + i * 28;
+      ctx.fillStyle = '#c0a030';
+      ctx.fillRect(cx - 5, bandY, 10, 3);
+      ctx.fillStyle = '#e8c840';
+      ctx.fillRect(cx - 4, bandY + 1, 8, 1);
     }
 
-    // Hand
+    // Central prong (tallest, with blade shape)
+    ctx.fillStyle = '#b0c0d8';
+    ctx.beginPath();
+    ctx.moveTo(cx - 3, y + 35);
+    ctx.lineTo(cx + 3, y + 35);
+    ctx.lineTo(cx + 4, y + 5);
+    ctx.lineTo(cx, y - 20);
+    ctx.lineTo(cx - 4, y + 5);
+    ctx.closePath();
+    ctx.fill();
+    // Center highlight
+    ctx.fillStyle = '#d0e0f0';
+    ctx.beginPath();
+    ctx.moveTo(cx - 1, y + 30);
+    ctx.lineTo(cx + 1, y + 30);
+    ctx.lineTo(cx + 1, y + 5);
+    ctx.lineTo(cx, y - 15);
+    ctx.lineTo(cx - 1, y + 5);
+    ctx.closePath();
+    ctx.fill();
+
+    // Left prong (curved outward)
+    ctx.fillStyle = '#a0b0c8';
+    ctx.beginPath();
+    ctx.moveTo(cx - 8, y + 38);
+    ctx.lineTo(cx - 5, y + 38);
+    ctx.lineTo(cx - 14, y + 8);
+    ctx.lineTo(cx - 20, y - 8);
+    ctx.lineTo(cx - 22, y - 5);
+    ctx.lineTo(cx - 16, y + 10);
+    ctx.closePath();
+    ctx.fill();
+
+    // Right prong (curved outward)
+    ctx.fillStyle = '#a0b0c8';
+    ctx.beginPath();
+    ctx.moveTo(cx + 5, y + 38);
+    ctx.lineTo(cx + 8, y + 38);
+    ctx.lineTo(cx + 16, y + 10);
+    ctx.lineTo(cx + 22, y - 5);
+    ctx.lineTo(cx + 20, y - 8);
+    ctx.lineTo(cx + 14, y + 8);
+    ctx.closePath();
+    ctx.fill();
+
+    // Prong tips glow
+    ctx.fillStyle = 'rgba(150,200,255,0.6)';
+    ctx.beginPath();
+    ctx.arc(cx, y - 18, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx - 21, y - 6, 3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(cx + 21, y - 6, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Cross guard / trident base
+    ctx.fillStyle = '#c0a030';
+    ctx.fillRect(cx - 18, y + 33, 36, 6);
+    ctx.fillStyle = '#e8c840';
+    ctx.fillRect(cx - 16, y + 35, 32, 2);
+
+    // Hand/grip
     ctx.fillStyle = '#8B6914';
-    ctx.fillRect(x + 45, y + 140, 30, 25);
+    ctx.fillRect(cx - 16, y + 145, 14, 30);
+    ctx.fillStyle = '#9B7924';
+    ctx.fillRect(cx - 14, y + 148, 10, 24);
+    // Fingers wrapping shaft
+    ctx.fillStyle = '#7B5904';
+    for (let f = 0; f < 4; f++) {
+      ctx.fillRect(cx - 6, y + 148 + f * 6, 10, 3);
+    }
+    // Thumb
+    ctx.fillStyle = '#8B6914';
+    ctx.fillRect(cx + 2, y + 145, 8, 20);
   }
 
   drawAgni(ctx, x, y, gs) {
-    // Agni - fire weapon (like shotgun)
-    ctx.fillStyle = '#cc4400';
-    ctx.fillRect(x + 30, y + 60, 60, 20); // body
-    ctx.fillStyle = '#aa3300';
-    ctx.fillRect(x + 35, y + 30, 12, 50); // barrel left
-    ctx.fillRect(x + 70, y + 30, 12, 50); // barrel right
+    // Agni - divine fire cannon (double-barreled flamethrower)
 
-    // Fire glow
+    // Main body (ornate, temple-shaped receiver)
+    const bodyGrad = ctx.createLinearGradient(x + 25, y + 55, x + 95, y + 55);
+    bodyGrad.addColorStop(0, '#882200');
+    bodyGrad.addColorStop(0.3, '#cc4400');
+    bodyGrad.addColorStop(0.5, '#dd5510');
+    bodyGrad.addColorStop(0.7, '#cc4400');
+    bodyGrad.addColorStop(1, '#882200');
+    ctx.fillStyle = bodyGrad;
+    ctx.fillRect(x + 25, y + 52, 70, 28);
+
+    // Body detail - ornate lines
+    ctx.strokeStyle = '#ff8833';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 28, y + 55, 64, 22);
+    ctx.fillStyle = '#ffaa44';
+    ctx.fillRect(x + 50, y + 58, 20, 3);
+    ctx.fillRect(x + 50, y + 70, 20, 3);
+
+    // Left barrel (with rifling details)
+    const bGrad = ctx.createLinearGradient(x + 32, y + 20, x + 50, y + 20);
+    bGrad.addColorStop(0, '#772200');
+    bGrad.addColorStop(0.4, '#aa4422');
+    bGrad.addColorStop(0.6, '#993311');
+    bGrad.addColorStop(1, '#661800');
+    ctx.fillStyle = bGrad;
+    ctx.fillRect(x + 33, y + 18, 16, 50);
+    // Barrel opening
+    ctx.fillStyle = '#331100';
+    ctx.fillRect(x + 35, y + 18, 12, 4);
+    // Heat vents
+    for (let v = 0; v < 3; v++) {
+      ctx.fillStyle = '#551100';
+      ctx.fillRect(x + 33, y + 28 + v * 10, 16, 2);
+    }
+
+    // Right barrel
+    ctx.fillStyle = bGrad;
+    ctx.fillRect(x + 68, y + 18, 16, 50);
+    ctx.fillStyle = '#331100';
+    ctx.fillRect(x + 70, y + 18, 12, 4);
+    for (let v = 0; v < 3; v++) {
+      ctx.fillStyle = '#551100';
+      ctx.fillRect(x + 68, y + 28 + v * 10, 16, 2);
+    }
+
+    // Fire glow from barrels
     if (gs.fireAnim > 0) {
-      ctx.fillStyle = `rgba(255, 100, 0, ${gs.fireAnim * 0.5})`;
+      const intensity = gs.fireAnim;
+      // Left barrel fire
+      ctx.fillStyle = `rgba(255, 180, 50, ${intensity * 0.6})`;
       ctx.beginPath();
-      ctx.arc(x + 58, y + 25, 20, 0, Math.PI * 2);
+      ctx.arc(x + 41, y + 14, 14 * intensity, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255, 80, 0, ${intensity * 0.4})`;
+      ctx.beginPath();
+      ctx.arc(x + 41, y + 8, 20 * intensity, 0, Math.PI * 2);
+      ctx.fill();
+      // Right barrel fire
+      ctx.fillStyle = `rgba(255, 180, 50, ${intensity * 0.6})`;
+      ctx.beginPath();
+      ctx.arc(x + 76, y + 14, 14 * intensity, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255, 80, 0, ${intensity * 0.4})`;
+      ctx.beginPath();
+      ctx.arc(x + 76, y + 8, 20 * intensity, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Hand
+    // Ember glow between barrels (always subtly glowing)
+    const ember = Math.sin(gs.time * 3) * 0.15 + 0.25;
+    ctx.fillStyle = `rgba(255, 100, 20, ${ember})`;
+    ctx.beginPath();
+    ctx.arc(x + 58, y + 40, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hand/grip
     ctx.fillStyle = '#8B6914';
-    ctx.fillRect(x + 40, y + 80, 40, 20);
+    ctx.fillRect(x + 38, y + 80, 16, 28);
+    ctx.fillStyle = '#9B7924';
+    ctx.fillRect(x + 40, y + 83, 12, 22);
+    // Fingers
+    ctx.fillStyle = '#7B5904';
+    for (let f = 0; f < 4; f++) {
+      ctx.fillRect(x + 52, y + 82 + f * 6, 12, 3);
+    }
+    // Thumb
+    ctx.fillStyle = '#8B6914';
+    ctx.fillRect(x + 62, y + 80, 8, 18);
   }
 
   drawChakra(ctx, x, y, gs) {
-    // Sudarshana Chakra launcher (like plasma gun)
-    ctx.fillStyle = '#ddaa00';
-    ctx.fillRect(x + 30, y + 50, 60, 25); // body
-
-    // Spinning disc
+    // Sudarshana Chakra launcher - Vishnu's divine disc weapon
+    const cx = x + 58;
     const spin = gs.time * 5;
+
+    // Launcher body (golden, angular, sci-fi temple tech)
+    const bodyGrad = ctx.createLinearGradient(x + 22, y + 45, x + 95, y + 45);
+    bodyGrad.addColorStop(0, '#8B6B00');
+    bodyGrad.addColorStop(0.3, '#C8A000');
+    bodyGrad.addColorStop(0.5, '#E8C830');
+    bodyGrad.addColorStop(0.7, '#C8A000');
+    bodyGrad.addColorStop(1, '#8B6B00');
+    ctx.fillStyle = bodyGrad;
+    ctx.fillRect(x + 22, y + 45, 72, 30);
+
+    // Upper housing for disc
+    ctx.fillStyle = '#aa8800';
+    ctx.fillRect(x + 30, y + 38, 56, 10);
+    // Rail grooves
+    ctx.fillStyle = '#776600';
+    ctx.fillRect(x + 32, y + 40, 52, 2);
+    ctx.fillRect(x + 32, y + 44, 52, 2);
+
+    // Ornate side panels
+    ctx.fillStyle = '#ddbb30';
+    ctx.fillRect(x + 24, y + 50, 3, 20);
+    ctx.fillRect(x + 91, y + 50, 3, 20);
+
+    // Spinning Sudarshana Chakra disc (detailed with serrated edges)
     ctx.save();
-    ctx.translate(x + 58, y + 30);
+    ctx.translate(cx, y + 22);
     ctx.rotate(spin);
+
+    // Outer serrated ring
     ctx.strokeStyle = '#ffdd00';
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 2;
     ctx.beginPath();
-    ctx.arc(0, 0, 18, 0, Math.PI * 2);
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      const r = i % 2 === 0 ? 22 : 18;
+      if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+      else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    ctx.closePath();
     ctx.stroke();
-    // Spokes
+    ctx.fillStyle = 'rgba(255,220,50,0.15)';
+    ctx.fill();
+
+    // Inner ring
+    ctx.strokeStyle = '#ffcc00';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, 12, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Spokes (8 ornate spokes)
+    ctx.strokeStyle = '#ffbb00';
+    ctx.lineWidth = 2;
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
       ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * 8, Math.sin(a) * 8);
-      ctx.lineTo(Math.cos(a) * 18, Math.sin(a) * 18);
+      ctx.moveTo(Math.cos(a) * 5, Math.sin(a) * 5);
+      ctx.lineTo(Math.cos(a) * 12, Math.sin(a) * 12);
+      ctx.stroke();
+    }
+
+    // Center hub (glowing)
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(0, 0, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,200,0.5)';
+    ctx.beginPath();
+    ctx.arc(0, 0, 7, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+
+    // Disc glow effect
+    const glowPulse = Math.sin(gs.time * 6) * 0.1 + 0.2;
+    ctx.fillStyle = `rgba(255,220,50,${glowPulse})`;
+    ctx.beginPath();
+    ctx.arc(cx, y + 22, 26, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Hand/grip
+    ctx.fillStyle = '#8B6914';
+    ctx.fillRect(x + 35, y + 75, 16, 28);
+    ctx.fillStyle = '#9B7924';
+    ctx.fillRect(x + 37, y + 78, 12, 22);
+    ctx.fillStyle = '#7B5904';
+    for (let f = 0; f < 4; f++) {
+      ctx.fillRect(x + 49, y + 77 + f * 6, 14, 3);
+    }
+    ctx.fillStyle = '#8B6914';
+    ctx.fillRect(x + 61, y + 75, 8, 18);
+  }
+
+  drawBrahmastra(ctx, x, y, gs) {
+    // Brahmastra - divine superweapon (BFG equivalent), massive energy cannon
+    const cx = x + 60;
+    const pulse = Math.sin(gs.time * 4) * 0.3 + 0.7;
+
+    // Main body (large, imposing, purple-black with gold trim)
+    const bodyGrad = ctx.createLinearGradient(x + 10, y + 38, x + 110, y + 38);
+    bodyGrad.addColorStop(0, '#330055');
+    bodyGrad.addColorStop(0.2, '#550077');
+    bodyGrad.addColorStop(0.5, '#660088');
+    bodyGrad.addColorStop(0.8, '#550077');
+    bodyGrad.addColorStop(1, '#330055');
+    ctx.fillStyle = bodyGrad;
+    ctx.fillRect(x + 12, y + 38, 96, 38);
+
+    // Gold trim lines
+    ctx.fillStyle = '#c8a000';
+    ctx.fillRect(x + 14, y + 40, 92, 2);
+    ctx.fillRect(x + 14, y + 73, 92, 2);
+    ctx.fillRect(x + 14, y + 56, 92, 1);
+
+    // Side vents (energy exhaust)
+    for (let v = 0; v < 3; v++) {
+      ctx.fillStyle = `rgba(200,0,255,${pulse * 0.3})`;
+      ctx.fillRect(x + 14, y + 45 + v * 9, 6, 4);
+      ctx.fillRect(x + 100, y + 45 + v * 9, 6, 4);
+    }
+
+    // Barrel (wide, flared muzzle)
+    const barrelGrad = ctx.createLinearGradient(x + 30, y + 12, x + 90, y + 12);
+    barrelGrad.addColorStop(0, '#440066');
+    barrelGrad.addColorStop(0.5, '#770099');
+    barrelGrad.addColorStop(1, '#440066');
+    ctx.fillStyle = barrelGrad;
+    ctx.fillRect(x + 32, y + 15, 56, 28);
+
+    // Barrel flare (widens at muzzle)
+    ctx.fillStyle = '#550077';
+    ctx.beginPath();
+    ctx.moveTo(x + 28, y + 12);
+    ctx.lineTo(x + 92, y + 12);
+    ctx.lineTo(x + 88, y + 18);
+    ctx.lineTo(x + 32, y + 18);
+    ctx.closePath();
+    ctx.fill();
+
+    // Barrel opening (dark void)
+    ctx.fillStyle = '#110022';
+    ctx.fillRect(x + 38, y + 12, 44, 5);
+
+    // Energy core (central glowing orb)
+    ctx.fillStyle = `rgba(150,0,255,${pulse * 0.4})`;
+    ctx.beginPath();
+    ctx.arc(cx, y + 35, 28, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(200,50,255,${pulse * 0.6})`;
+    ctx.beginPath();
+    ctx.arc(cx, y + 35, 18, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(255,150,255,${pulse * 0.8})`;
+    ctx.beginPath();
+    ctx.arc(cx, y + 35, 10, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Core center (white-hot)
+    ctx.fillStyle = `rgba(255,220,255,${pulse})`;
+    ctx.beginPath();
+    ctx.arc(cx, y + 35, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Energy tendrils (rotating around core)
+    ctx.save();
+    ctx.translate(cx, y + 35);
+    ctx.rotate(gs.time * 3);
+    ctx.strokeStyle = `rgba(200,100,255,${pulse * 0.5})`;
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 10, Math.sin(a) * 10);
+      ctx.lineTo(Math.cos(a + 0.3) * 22, Math.sin(a + 0.3) * 22);
       ctx.stroke();
     }
     ctx.restore();
 
-    // Hand
+    // Sanskrit-like rune markings on body
+    ctx.fillStyle = `rgba(200,150,255,${0.2 + pulse * 0.15})`;
+    for (let r = 0; r < 4; r++) {
+      ctx.fillRect(x + 22 + r * 22, y + 62, 12, 3);
+    }
+
+    // Hand/grip (both hands for big weapon)
+    // Left hand
     ctx.fillStyle = '#8B6914';
-    ctx.fillRect(x + 40, y + 75, 40, 20);
-  }
-
-  drawBrahmastra(ctx, x, y, gs) {
-    // Brahmastra - BFG equivalent
-    ctx.fillStyle = '#660088';
-    ctx.fillRect(x + 20, y + 40, 80, 35); // body
-    ctx.fillStyle = '#880088';
-    ctx.fillRect(x + 40, y + 20, 40, 30); // barrel
-
-    // Energy glow
-    const pulse = Math.sin(gs.time * 4) * 0.3 + 0.7;
-    ctx.fillStyle = `rgba(200, 0, 255, ${pulse * 0.6})`;
-    ctx.beginPath();
-    ctx.arc(x + 60, y + 35, 25, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = `rgba(255, 100, 255, ${pulse * 0.8})`;
-    ctx.beginPath();
-    ctx.arc(x + 60, y + 35, 12, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Hand
+    ctx.fillRect(x + 25, y + 76, 16, 28);
+    ctx.fillStyle = '#9B7924';
+    ctx.fillRect(x + 27, y + 79, 12, 22);
+    ctx.fillStyle = '#7B5904';
+    for (let f = 0; f < 4; f++) {
+      ctx.fillRect(x + 39, y + 78 + f * 6, 10, 3);
+    }
+    // Right hand
     ctx.fillStyle = '#8B6914';
-    ctx.fillRect(x + 35, y + 75, 50, 20);
+    ctx.fillRect(x + 72, y + 76, 16, 28);
+    ctx.fillStyle = '#9B7924';
+    ctx.fillRect(x + 74, y + 79, 12, 22);
+    ctx.fillStyle = '#7B5904';
+    for (let f = 0; f < 4; f++) {
+      ctx.fillRect(x + 66, y + 78 + f * 6, 8, 3);
+    }
   }
 
   renderHUD(ctx, player, gameState, w, h) {
