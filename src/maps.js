@@ -246,7 +246,7 @@ function loadLevel(levelIndex) {
       hurt: false,
       hurtTimer: 0,
       attackCooldown: 0,
-      widthRatio: e.boss ? 1.5 : 1,
+      widthRatio: e.boss ? 1.85 : 1,
       verticalOffset: 0,
       boss: e.boss || false,
       name: e.name || e.type.toUpperCase(),

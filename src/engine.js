@@ -5,7 +5,8 @@ const TILE_SIZE = 64;
 const FOV = Math.PI / 3; // 60 degrees
 const HALF_FOV = FOV / 2;
 const MAX_DEPTH = 20;
-const MINIMAP_SCALE = 0.15;
+const MINIMAP_SCALE = 0.22;
+const MINIMAP_SCALE_EXPANDED = 0.55;
 
 class RaycastEngine {
   constructor(canvas) {
@@ -90,6 +91,10 @@ class RaycastEngine {
 
   render(player, map, sprites, gameState) {
     const ctx = this.ctx;
+    // Read current canvas size each frame so resize works
+    this.width = this.canvas.width;
+    this.height = this.canvas.height;
+    this.numRays = this.width;
     const w = this.width;
     const h = this.height;
 
@@ -107,6 +112,13 @@ class RaycastEngine {
     floorGrad.addColorStop(1, '#1a0f06');
     ctx.fillStyle = floorGrad;
     ctx.fillRect(0, h / 2, w, h / 2);
+
+    // --- Screen shake offset (applied to the world layer only) ---
+    const shakeMag = (gameState && gameState.screenShakeMag) || 0;
+    const shakeX = shakeMag > 0 ? (Math.random() - 0.5) * shakeMag * 2 : 0;
+    const shakeY = shakeMag > 0 ? (Math.random() - 0.5) * shakeMag * 2 : 0;
+    ctx.save();
+    if (shakeMag > 0) ctx.translate(shakeX, shakeY);
 
     // Raycasting
     const zBuffer = [];
@@ -142,17 +154,32 @@ class RaycastEngine {
       }
     }
 
+    // Exit portal (drawn after walls, occluded by zBuffer)
+    if (gameState && gameState.exit) {
+      this.renderExitPortal(ctx, player, gameState, zBuffer, w, h);
+    }
+
     // Render sprites
     this.renderSprites(ctx, player, sprites, zBuffer, w, h);
 
-    // Render weapon
+    // Blood / FX particles in world space
+    if (gameState && gameState.particles && gameState.particles.length) {
+      this.renderParticles(ctx, player, gameState.particles, zBuffer, w, h);
+    }
+
+    // Wind-up "telegraph" indicators above enemies preparing to attack
+    this.renderWindupIndicators(ctx, player, sprites, zBuffer, w, h, gameState);
+
+    // Render weapon (also affected by shake)
     this.renderWeapon(ctx, player, gameState, w, h);
 
-    // Render HUD
+    ctx.restore();
+
+    // HUD (no shake)
     this.renderHUD(ctx, player, gameState, w, h);
 
-    // Render minimap
-    this.renderMinimap(ctx, player, map, sprites, w, h);
+    // Minimap (no shake)
+    this.renderMinimap(ctx, player, map, sprites, gameState, w, h);
   }
 
   getWallColor(texture, isHorizontal, shade, texX) {
@@ -238,6 +265,127 @@ class RaycastEngine {
           this.drawSpriteColumn(ctx, sprite, x, spriteTop, spriteHeight, spriteWidth, screenX, shade);
         }
       }
+    }
+  }
+
+  renderExitPortal(ctx, player, gameState, zBuffer, w, h) {
+    const exit = gameState.exit;
+    const ex = (exit.x + 0.5) * TILE_SIZE;
+    const ey = (exit.y + 0.5) * TILE_SIZE;
+    const dx = ex - player.x;
+    const dy = ey - player.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 4) return;
+
+    let angle = Math.atan2(dy, dx) - player.angle;
+    while (angle > Math.PI) angle -= 2 * Math.PI;
+    while (angle < -Math.PI) angle += 2 * Math.PI;
+    if (Math.abs(angle) > HALF_FOV + 0.3) return;
+
+    const screenX = (0.5 + angle / FOV) * w;
+    const portalH = (TILE_SIZE * h) / dist;
+    const portalW = portalH * 0.55;
+    const top = (h - portalH) / 2;
+    const startX = Math.max(0, Math.floor(screenX - portalW / 2));
+    const endX = Math.min(w, Math.ceil(screenX + portalW / 2));
+
+    const t = gameState.time || 0;
+    const pulse = 0.55 + 0.35 * Math.sin(t * 4);
+
+    const grad = ctx.createLinearGradient(0, top, 0, top + portalH);
+    grad.addColorStop(0,    `rgba(255, 255, 200, ${0.05 * pulse})`);
+    grad.addColorStop(0.4,  `rgba(255, 220, 60, ${0.55 * pulse})`);
+    grad.addColorStop(0.55, `rgba(255, 200, 30, ${0.85 * pulse})`);
+    grad.addColorStop(0.7,  `rgba(255, 170, 20, ${0.55 * pulse})`);
+    grad.addColorStop(1,    `rgba(255, 130, 0, ${0.15 * pulse})`);
+
+    for (let x = startX; x < endX; x++) {
+      if (zBuffer[x] !== undefined && dist >= zBuffer[x]) continue;
+      const relX = (x - (screenX - portalW / 2)) / portalW;
+      const edgeFade = Math.max(0, 1 - Math.abs(relX - 0.5) * 2);
+      if (edgeFade <= 0) continue;
+      const shimmer = 0.85 + 0.15 * Math.sin(relX * 14 + t * 7);
+      ctx.globalAlpha = edgeFade * shimmer;
+      ctx.fillStyle = grad;
+      ctx.fillRect(x, top, 1, portalH);
+    }
+    ctx.globalAlpha = 1;
+
+    // Bright vertical core spire
+    const coreA = 0.35 + 0.35 * pulse;
+    const coreW = Math.max(1, portalW * 0.05);
+    if (zBuffer[Math.floor(screenX)] === undefined || dist < zBuffer[Math.floor(screenX)]) {
+      ctx.fillStyle = `rgba(255, 255, 220, ${coreA})`;
+      ctx.fillRect(screenX - coreW / 2, top, coreW, portalH);
+    }
+  }
+
+  renderParticles(ctx, player, particles, zBuffer, w, h) {
+    for (const p of particles) {
+      const dx = p.x - player.x;
+      const dy = p.y - player.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 1) continue;
+      let angle = Math.atan2(dy, dx) - player.angle;
+      while (angle > Math.PI) angle -= 2 * Math.PI;
+      while (angle < -Math.PI) angle += 2 * Math.PI;
+      if (Math.abs(angle) > HALF_FOV + 0.1) continue;
+
+      const screenX = (0.5 + angle / FOV) * w;
+      const sxi = Math.floor(screenX);
+      if (sxi < 0 || sxi >= w) continue;
+      if (zBuffer[sxi] !== undefined && dist >= zBuffer[sxi]) continue;
+
+      const projH = (TILE_SIZE * h) / dist;
+      const spriteTop = (h - projH) / 2;
+      const screenY = spriteTop + projH * (1 - p.z);
+      const size = Math.max(1, p.size * (projH / TILE_SIZE) * 0.6);
+      const a = Math.max(0, Math.min(1, p.life / p.maxLife));
+      ctx.globalAlpha = a;
+      ctx.fillStyle = p.color || '#aa0000';
+      ctx.fillRect(screenX - size / 2, screenY - size / 2, size, size);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  renderWindupIndicators(ctx, player, sprites, zBuffer, w, h, gameState) {
+    for (const sprite of sprites) {
+      if (!sprite.active || !sprite.health) continue;
+      if (!sprite.windupTimer || sprite.windupTimer <= 0) continue;
+
+      const dx = sprite.x - player.x;
+      const dy = sprite.y - player.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 1) continue;
+      let angle = Math.atan2(dy, dx) - player.angle;
+      while (angle > Math.PI) angle -= 2 * Math.PI;
+      while (angle < -Math.PI) angle += 2 * Math.PI;
+      if (Math.abs(angle) > HALF_FOV + 0.1) continue;
+
+      const screenX = (0.5 + angle / FOV) * w;
+      const sxi = Math.floor(screenX);
+      if (sxi < 0 || sxi >= w) continue;
+      if (zBuffer[sxi] !== undefined && dist >= zBuffer[sxi]) continue;
+
+      const projH = (TILE_SIZE * h) / dist * (sprite.boss ? 1.7 : 1);
+      const spriteTop = (h - projH) / 2 + (sprite.verticalOffset || 0);
+
+      const charge = 1 - sprite.windupTimer / (sprite.windupMax || 0.3);
+      const r = Math.max(4, projH * 0.06);
+      const cy = spriteTop - r * 1.4;
+
+      const glow = ctx.createRadialGradient(screenX, cy, 0, screenX, cy, r * 3);
+      glow.addColorStop(0, `rgba(255, 60, 30, ${0.7 * (0.5 + 0.5 * charge)})`);
+      glow.addColorStop(1, 'rgba(255, 60, 30, 0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(screenX, cy, r * 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = `rgba(255, 200, 80, ${0.6 + 0.4 * charge})`;
+      ctx.beginPath();
+      ctx.arc(screenX, cy, r * (0.6 + 0.4 * charge), 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
@@ -416,6 +564,43 @@ class RaycastEngine {
     // Rakshasa - massive hulking purple-black demon with three eyes, heavy armor, and huge horns
     const s = shade;
     const hf = sprite.hurt ? 0.7 : 0;
+
+    // --- Boss treatment (Mahishasura): golden halo, crown, infernal aura ---
+    if (sprite.boss) {
+      // Golden halo radiating from the head
+      if (relX > 0.18 && relX < 0.82) {
+        const headDist = Math.abs(relX - 0.5) / 0.32;
+        const haloA = Math.max(0, 1 - headDist * headDist);
+        if (haloA > 0) {
+          ctx.fillStyle = `rgba(255, 200, 30, ${0.55 * haloA * s})`;
+          ctx.fillRect(x, top - height * 0.04, 1, height * 0.32);
+        }
+      }
+      // Body-wide infernal red aura (subtle, behind torso)
+      if (relX > 0.05 && relX < 0.95) {
+        const bodyDist = Math.abs(relX - 0.5) / 0.45;
+        const auraA = Math.max(0, 1 - bodyDist) * 0.18;
+        ctx.fillStyle = `rgba(255, 60, 20, ${auraA * s})`;
+        ctx.fillRect(x, top + height * 0.1, 1, height * 0.85);
+      }
+      // Gold crown across the top of the head, between the horns
+      if (relX > 0.34 && relX < 0.66) {
+        const crownY = top - height * 0.01;
+        ctx.fillStyle = `rgb(${Math.floor(220*s)},${Math.floor(180*s)},${Math.floor(40*s)})`;
+        ctx.fillRect(x, crownY, 1, height * 0.07);
+        // Crown spike points (alternating)
+        const spikePhase = Math.floor((relX - 0.34) * 18) % 2;
+        if (spikePhase === 0) {
+          ctx.fillStyle = `rgb(${Math.min(255,Math.floor(255*s))},${Math.floor(220*s)},${Math.floor(80*s)})`;
+          ctx.fillRect(x, crownY - height * 0.04, 1, height * 0.05);
+        }
+        // Center jewel
+        if (relX > 0.48 && relX < 0.52) {
+          ctx.fillStyle = `rgb(${Math.min(255,Math.floor(255*s))},${Math.floor(60*s)},${Math.floor(60*s)})`;
+          ctx.fillRect(x, crownY + height * 0.02, 1, height * 0.04);
+        }
+      }
+    }
 
     // Legs (thick, trunk-like)
     if ((relX > 0.18 && relX < 0.38) || (relX > 0.62 && relX < 0.82)) {
@@ -1245,21 +1430,102 @@ class RaycastEngine {
     ctx.fillStyle = '#aaa';
     ctx.font = '12px monospace';
     ctx.fillText(`KOLAI: ${gameState.kills}/${gameState.totalEnemies}`, w - 120, hudY + 48);
+
+    // --- Compass arrow pointing to the level exit ---
+    if (gameState && gameState.exit) {
+      const ex = (gameState.exit.x + 0.5) * TILE_SIZE;
+      const ey = (gameState.exit.y + 0.5) * TILE_SIZE;
+      const dx = ex - player.x;
+      const dy = ey - player.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      let rel = Math.atan2(dy, dx) - player.angle;
+      while (rel > Math.PI) rel -= 2 * Math.PI;
+      while (rel < -Math.PI) rel += 2 * Math.PI;
+
+      const cx = w / 2;
+      const cy = 60;
+      const r = 22;
+
+      // Background ring
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.beginPath();
+      ctx.arc(cx, cy, r + 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#c8a000';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Tiny "N" / forward marker at top of ring (your facing)
+      ctx.fillStyle = 'rgba(200, 160, 0, 0.7)';
+      ctx.fillRect(cx - 1, cy - r - 2, 2, 4);
+
+      // Arrow rotated to point at exit (up = forward)
+      const aligned = Math.abs(rel) < 0.22;
+      const a = -Math.PI / 2 + rel;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(a);
+      // Arrow color: green when on-target, gold otherwise
+      ctx.fillStyle = aligned ? '#44ff77' : '#ffcc00';
+      ctx.beginPath();
+      ctx.moveTo(r - 4, 0);
+      ctx.lineTo(-r + 10, -8);
+      ctx.lineTo(-r + 14, 0);
+      ctx.lineTo(-r + 10, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.restore();
+
+      // Distance label
+      ctx.fillStyle = '#c8a000';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${Math.round(dist / TILE_SIZE)}`, cx, cy + r + 14);
+      ctx.fillStyle = 'rgba(200,160,0,0.6)';
+      ctx.font = '9px monospace';
+      ctx.fillText('VAZHI', cx, cy + r + 25);
+      ctx.textAlign = 'left';
+    }
   }
 
-  renderMinimap(ctx, player, map, sprites, w, h) {
-    const size = TILE_SIZE * MINIMAP_SCALE;
+  renderMinimap(ctx, player, map, sprites, gameState, w, h) {
+    const expanded = !!(gameState && gameState.mapExpanded);
+    let scale = expanded ? MINIMAP_SCALE_EXPANDED : MINIMAP_SCALE;
+
+    // If expanded map would overflow the screen, shrink it to fit
+    if (expanded) {
+      const maxByW = (w * 0.85) / (map.width * TILE_SIZE);
+      const maxByH = (h * 0.85) / (map.height * TILE_SIZE);
+      scale = Math.min(scale, maxByW, maxByH);
+    }
+
+    const size = TILE_SIZE * scale;
     const mapW = map.width * size;
     const mapH = map.height * size;
-    const offsetX = 10;
-    const offsetY = 10;
+    const offsetX = expanded ? Math.floor((w - mapW) / 2) : 10;
+    const offsetY = expanded ? Math.floor((h - mapH) / 2) : 10;
 
     ctx.save();
-    ctx.globalAlpha = 0.7;
+
+    if (expanded) {
+      // Dim everything else when full map is open
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    ctx.globalAlpha = expanded ? 0.96 : 0.78;
 
     // Background
     ctx.fillStyle = '#000';
     ctx.fillRect(offsetX - 2, offsetY - 2, mapW + 4, mapH + 4);
+
+    // Border
+    ctx.strokeStyle = '#c8a000';
+    ctx.lineWidth = expanded ? 2 : 1;
+    ctx.strokeRect(offsetX - 2, offsetY - 2, mapW + 4, mapH + 4);
 
     // Tiles
     for (let y = 0; y < map.height; y++) {
@@ -1273,14 +1539,35 @@ class RaycastEngine {
       }
     }
 
+    // Exit marker (pulsing yellow X with halo)
+    if (gameState && gameState.exit) {
+      const ex = offsetX + (gameState.exit.x + 0.5) * size;
+      const ey = offsetY + (gameState.exit.y + 0.5) * size;
+      const t = (gameState.time || 0);
+      const pulse = 0.5 + 0.5 * Math.sin(t * 5);
+      const r = size * (1.0 + pulse * 0.5);
+      const halo = ctx.createRadialGradient(ex, ey, 0, ex, ey, r * 2.5);
+      halo.addColorStop(0, `rgba(255, 230, 60, ${0.6 + 0.3 * pulse})`);
+      halo.addColorStop(1, 'rgba(255, 230, 60, 0)');
+      ctx.fillStyle = halo;
+      ctx.fillRect(ex - r * 2.5, ey - r * 2.5, r * 5, r * 5);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = expanded ? 2 : 1.5;
+      ctx.beginPath();
+      ctx.moveTo(ex - r, ey - r); ctx.lineTo(ex + r, ey + r);
+      ctx.moveTo(ex + r, ey - r); ctx.lineTo(ex - r, ey + r);
+      ctx.stroke();
+    }
+
     // Enemy dots
     for (const s of sprites) {
       if (!s.active || !['asura', 'rakshasa', 'naga'].includes(s.type)) continue;
-      ctx.fillStyle = '#ff0000';
+      ctx.fillStyle = s.boss ? '#ffcc00' : '#ff0000';
+      const r = (s.boss ? 4 : 2) * (expanded ? 1.4 : 1);
       ctx.fillRect(
-        offsetX + (s.x / TILE_SIZE) * size - 1,
-        offsetY + (s.y / TILE_SIZE) * size - 1,
-        3, 3
+        offsetX + (s.x / TILE_SIZE) * size - r / 2,
+        offsetY + (s.y / TILE_SIZE) * size - r / 2,
+        r, r
       );
     }
 
@@ -1288,14 +1575,31 @@ class RaycastEngine {
     ctx.fillStyle = '#00ff00';
     const px = offsetX + (player.x / TILE_SIZE) * size;
     const py = offsetY + (player.y / TILE_SIZE) * size;
-    ctx.fillRect(px - 2, py - 2, 4, 4);
+    const pr = expanded ? 4 : 2;
+    ctx.fillRect(px - pr, py - pr, pr * 2, pr * 2);
 
     // Direction
     ctx.strokeStyle = '#00ff00';
+    ctx.lineWidth = expanded ? 2 : 1;
+    const dirLen = expanded ? 18 : 10;
     ctx.beginPath();
     ctx.moveTo(px, py);
-    ctx.lineTo(px + Math.cos(player.angle) * 10, py + Math.sin(player.angle) * 10);
+    ctx.lineTo(px + Math.cos(player.angle) * dirLen, py + Math.sin(player.angle) * dirLen);
     ctx.stroke();
+
+    if (expanded) {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#c8a000';
+      ctx.font = 'bold 14px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('PADAM (M to close)', w / 2, Math.max(20, offsetY - 10));
+      ctx.textAlign = 'left';
+    } else {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = 'rgba(200, 160, 0, 0.7)';
+      ctx.font = '10px monospace';
+      ctx.fillText('M = padam', offsetX, offsetY + mapH + 12);
+    }
 
     ctx.restore();
   }
