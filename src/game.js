@@ -45,6 +45,11 @@ class Game {
       screenFlash: 0,
       screenFlashColor: 'red',
       damageDir: 0,
+      // Phase 0: navigation cues + screen shake + exit portal
+      exit: null,
+      mapExpanded: false,
+      screenShakeMag: 0,
+      particles: [],
     };
 
     this.sprites = [];
@@ -72,6 +77,7 @@ class Game {
       if (e.code === 'Digit3') this.switchWeapon('chakra');
       if (e.code === 'Digit4') this.switchWeapon('brahmastra');
       if (e.code === 'KeyE') this.interact();
+      if (e.code === 'KeyM') this.gameState.mapExpanded = !this.gameState.mapExpanded;
       if (e.code === 'Escape') {
         if (this.gameState.gameOver || this.gameState.victory) {
           this.restart();
@@ -164,6 +170,8 @@ class Game {
     this.gameState.victory = false;
     this.gameState.paused = false;
     this.gameState.level = 1;
+    this.gameState.particles = [];
+    this.gameState.screenShakeMag = 0;
     this.projectiles = [];
     this.loadLevel(0);
   }
@@ -185,6 +193,9 @@ class Game {
     this.gameState.totalEnemies = level.totalEnemies;
     this.gameState.kills = 0;
     this.levelExit = level.exit;
+    this.gameState.exit = level.exit;
+    this.gameState.particles = [];
+    this.gameState.screenShakeMag = 0;
     this.projectiles = [];
 
     // Give weapons on later levels
@@ -294,6 +305,29 @@ class Game {
     // Screen flash
     if (this.gameState.screenFlash > 0) {
       this.gameState.screenFlash = Math.max(0, this.gameState.screenFlash - dt * 3);
+    }
+
+    // Screen shake decay
+    if (this.gameState.screenShakeMag > 0) {
+      this.gameState.screenShakeMag = Math.max(0, this.gameState.screenShakeMag - dt * 18);
+    }
+
+    // Particle update (blood + sparks)
+    const particles = this.gameState.particles;
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.life -= dt;
+      if (p.life <= 0) {
+        particles.splice(i, 1);
+        continue;
+      }
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.z += p.vz * dt;
+      p.vz += 4 * dt; // gravity pulls particle downward on screen
+      // Air drag
+      p.vx *= 0.92;
+      p.vy *= 0.92;
     }
 
     // Death check
@@ -485,9 +519,42 @@ class Game {
   damageEnemy(sprite, damage) {
     sprite.health -= damage;
     sprite.hurt = true;
-    sprite.hurtTimer = 0.15;
+    sprite.hurtTimer = 0.25;
     sprite.state = 'chase';
     this.sound.play('hit');
+
+    // Knockback away from player
+    const kdx = sprite.x - this.player.x;
+    const kdy = sprite.y - this.player.y;
+    const klen = Math.sqrt(kdx * kdx + kdy * kdy) || 1;
+    const knockMag = sprite.boss ? 4 : (12 + damage * 0.3);
+    sprite.knockX = (kdx / klen) * knockMag;
+    sprite.knockY = (kdy / klen) * knockMag;
+
+    // Blood particle burst at the impact point
+    const burstCount = 6 + Math.floor(damage / 10);
+    for (let p = 0; p < burstCount; p++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 30 + Math.random() * 70;
+      this.gameState.particles.push({
+        x: sprite.x,
+        y: sprite.y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        z: 0.4 + Math.random() * 0.4,    // vertical position 0..1 of sprite height
+        vz: -1.2 - Math.random() * 0.6,   // gravity (positive = down on screen)
+        life: 0.45 + Math.random() * 0.3,
+        maxLife: 0.7,
+        size: 2 + Math.random() * 3,
+        color: sprite.boss ? '#ff3300' : '#aa0000',
+      });
+    }
+
+    // Tiny screen shake on every hit, more on boss hit
+    this.gameState.screenShakeMag = Math.max(
+      this.gameState.screenShakeMag,
+      sprite.boss ? 4 : 2
+    );
 
     if (sprite.health <= 0) {
       sprite.active = false;
@@ -496,6 +563,7 @@ class Game {
       this.sound.play('enemyDeath');
 
       if (sprite.boss) {
+        this.gameState.screenShakeMag = Math.max(this.gameState.screenShakeMag, 14);
         this.showMessage('MAHISHASURA VEEZHNDHAAN!', 5);
         // Drop brahmastra on boss kill
         if (!this.gameState.weapons.includes('brahmastra')) {
@@ -523,6 +591,8 @@ class Game {
   }
 
   updateEnemies(dt) {
+    const enemyTypes = { asura: true, naga: true, rakshasa: true };
+
     for (const sprite of this.sprites) {
       if (!sprite.active || !sprite.health) continue;
 
@@ -542,27 +612,78 @@ class Game {
       const dist = Math.sqrt(dx * dx + dy * dy);
       const tileDist = dist / TILE_SIZE;
 
+      // --- Apply lingering knockback impulse from being hit ---
+      if (sprite.knockX || sprite.knockY) {
+        const kx = sprite.knockX || 0;
+        const ky = sprite.knockY || 0;
+        if (!this.isWall(sprite.x + kx, sprite.y)) sprite.x += kx;
+        if (!this.isWall(sprite.x, sprite.y + ky)) sprite.y += ky;
+        sprite.knockX = kx * 0.55;
+        sprite.knockY = ky * 0.55;
+        if (Math.abs(sprite.knockX) < 0.4 && Math.abs(sprite.knockY) < 0.4) {
+          sprite.knockX = 0;
+          sprite.knockY = 0;
+        }
+      }
+
       // Alert range
       if (tileDist < sprite.alertRange || sprite.state === 'chase') {
         sprite.state = 'chase';
 
-        if (tileDist < sprite.attackRange) {
-          // Attack
-          if (sprite.attackCooldown <= 0) {
-            this.takeDamage(sprite.damage, Math.atan2(-dy, -dx));
+        // --- Attack with wind-up telegraph ---
+        const windupDur = sprite.boss ? 0.5 : 0.3;
+        if (sprite.windupTimer > 0) {
+          sprite.windupTimer -= dt;
+          // Lock in place while winding up
+          if (sprite.windupTimer <= 0) {
+            // Resolve attack: only land hit if still in range
+            if (tileDist < sprite.attackRange + 0.3) {
+              this.takeDamage(sprite.damage, Math.atan2(-dy, -dx));
+              this.sound.play('enemyAttack');
+            }
             sprite.attackCooldown = sprite.boss ? 1.0 : 1.5;
-            this.sound.play('enemyAttack');
           }
-        } else {
-          // Move toward player
+        } else if (tileDist < sprite.attackRange && sprite.attackCooldown <= 0) {
+          // Begin wind-up
+          sprite.windupTimer = windupDur;
+          sprite.windupMax = windupDur;
+        } else if (tileDist >= sprite.attackRange) {
+          // --- Movement with circle-vs-circle separation from other enemies ---
           const angle = Math.atan2(dy, dx);
           const moveSpeed = sprite.speed * TILE_SIZE * dt;
-          const newX = sprite.x + Math.cos(angle) * moveSpeed;
-          const newY = sprite.y + Math.sin(angle) * moveSpeed;
 
-          // Simple collision check for enemies
-          if (!this.isWall(newX, sprite.y)) sprite.x = newX;
-          if (!this.isWall(sprite.x, newY)) sprite.y = newY;
+          let mx = Math.cos(angle) * moveSpeed;
+          let my = Math.sin(angle) * moveSpeed;
+
+          // Sum separation force from nearby enemies
+          const sepRadius = TILE_SIZE * 0.85;
+          let sepX = 0, sepY = 0;
+          for (const other of this.sprites) {
+            if (other === sprite || !other.active || !other.health) continue;
+            if (!enemyTypes[other.type]) continue;
+            const odx = sprite.x - other.x;
+            const ody = sprite.y - other.y;
+            const od = Math.sqrt(odx * odx + ody * ody);
+            if (od > 0 && od < sepRadius) {
+              const push = (sepRadius - od) / sepRadius;
+              sepX += (odx / od) * push;
+              sepY += (ody / od) * push;
+            }
+          }
+          // Add separation contribution (scaled to feel like a gentle nudge)
+          mx += sepX * moveSpeed * 0.9;
+          my += sepY * moveSpeed * 0.9;
+
+          // Try combined move first; fall back to per-axis on wall hit
+          const newX = sprite.x + mx;
+          const newY = sprite.y + my;
+          if (!this.isWall(newX, newY)) {
+            sprite.x = newX;
+            sprite.y = newY;
+          } else {
+            if (!this.isWall(newX, sprite.y)) sprite.x = newX;
+            if (!this.isWall(sprite.x, newY)) sprite.y = newY;
+          }
         }
       }
     }
