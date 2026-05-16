@@ -1,4 +1,4 @@
-# VIDHI - Tamil Doom
+# VIDHI - Tamil Horror FPS
 
 A browser-playable Doom-style FPS built from scratch with HTML5 Canvas raycasting. Tamil-themed with temples, Asuras, and mythological weapons.
 
