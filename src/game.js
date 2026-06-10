@@ -444,7 +444,9 @@ class Game {
   // Grid-stepped line of sight between two points
   hasLOS(x0, y0, x1, y1) {
     const dist = Math.hypot(x1 - x0, y1 - y0);
-    const steps = Math.ceil(dist / (TILE_SIZE / 2));
+    // At least 2 steps so the midpoint is always checked, even at point-blank
+    // range (e.g. across a wall corner between diagonal tiles).
+    const steps = Math.max(2, Math.ceil(dist / (TILE_SIZE / 2)));
     for (let i = 1; i < steps; i++) {
       const t = i / steps;
       if (this.isWall(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return false;
@@ -1070,30 +1072,24 @@ class Game {
     }
   }
 
-  // Project a world point to screen for the telegraph markers
   renderWindupIndicators(ctx, w, h) {
-    const FOV = Math.PI / 3;
     for (const sprite of this.sprites) {
       if (!sprite.active || !sprite.health) continue;
       if (!sprite.windupTimer || sprite.windupTimer <= 0) continue;
 
-      const dx = sprite.x - this.player.x;
-      const dy = sprite.y - this.player.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+      const dist = Math.hypot(sprite.x - this.player.x, sprite.y - this.player.y);
       if (dist < 1) continue;
-      let angle = Math.atan2(dy, dx) - this.player.angle;
-      while (angle > Math.PI) angle -= 2 * Math.PI;
-      while (angle < -Math.PI) angle += 2 * Math.PI;
-      if (Math.abs(angle) > FOV / 2 + 0.1) continue;
       if (!this.hasLOS(this.player.x, this.player.y, sprite.x, sprite.y)) continue;
 
-      const screenX = (0.5 + angle / FOV) * w;
-      const projH = (TILE_SIZE * h) / dist * (sprite.boss ? 1.7 : 1);
-      const top = (h - projH) / 2 + this.player.pitch * h * 0.6;
+      // Camera-accurate point above the enemy's head
+      const pt = this.renderer.projectSpriteTop(sprite, w, h);
+      if (!pt) continue;
+      const screenX = pt.x;
+      const cy = pt.y;
 
+      const projH = (TILE_SIZE * h) / dist * (sprite.boss ? 1.7 : 1);
       const charge = 1 - sprite.windupTimer / (sprite.windupMax || 0.3);
       const r = Math.max(4, projH * 0.06);
-      const cy = top - r * 1.4;
 
       const glow = ctx.createRadialGradient(screenX, cy, 0, screenX, cy, r * 3);
       glow.addColorStop(0, `rgba(255, 60, 30, ${0.7 * (0.5 + 0.5 * charge)})`);

@@ -62,8 +62,23 @@ export class Renderer3D {
     this.lightningT = 0;
     this.torchOutage = { idx: -1, t: 0 };
 
+    this._projVec = new THREE.Vector3();
+
     this._initParticles();
     this._initProjectilePools();
+  }
+
+  // Project a point just above a sprite's head to HUD pixel coords using the
+  // real camera. Returns null when the sprite has no mesh yet or the point is
+  // behind / well outside the frustum. Valid after render() for this frame.
+  projectSpriteTop(sprite, w, h) {
+    const mesh = this._spriteMeshes && this._spriteMeshes.get(sprite);
+    if (!mesh) return null;
+    const size = mesh.userData.size || 1;
+    const v = this._projVec.set(mesh.position.x, mesh.position.y + size * 0.6, mesh.position.z);
+    v.project(this.camera);
+    if (v.z > 1 || Math.abs(v.x) > 1.2 || Math.abs(v.y) > 1.5) return null;
+    return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h };
   }
 
   onResize(w, h) {
