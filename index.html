@@ -2,312 +2,356 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VIDHI - Tamil Doom</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>VIDHI - Tamil Horror Doom</title>
+  <script type="importmap">
+    { "imports": { "three": "./lib/three.module.min.js" } }
+  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
-    body {
-      background: #0a0a0a;
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #050308;
       color: #c8a000;
       font-family: 'Courier New', monospace;
       overflow: hidden;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
       user-select: none;
+      -webkit-user-select: none;
     }
 
+    /* ---------- Title screen ---------- */
     #title-screen {
-      position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
+      position: fixed;
+      inset: 0;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      z-index: 10;
-      background: linear-gradient(180deg, #0a0015 0%, #1a0a2e 30%, #2d0a1e 60%, #0a0015 100%);
+      z-index: 30;
+      background:
+        radial-gradient(ellipse at 50% 120%, rgba(120, 20, 0, 0.35), transparent 60%),
+        linear-gradient(180deg, #020108 0%, #0a0512 45%, #150508 80%, #050108 100%);
+      text-align: center;
+      padding: 0 16px;
     }
 
     #title-screen h1 {
-      font-size: 120px;
-      color: #ff3300;
+      font-size: clamp(56px, 14vw, 120px);
+      color: #b81c00;
       text-shadow:
-        0 0 20px #ff3300,
-        0 0 40px #ff0000,
-        0 0 80px #cc0000,
-        0 4px 0 #880000;
-      letter-spacing: 20px;
-      margin-bottom: 10px;
-      animation: pulse 2s ease-in-out infinite;
+        0 0 18px rgba(255, 40, 0, 0.55),
+        0 0 60px rgba(180, 0, 0, 0.4),
+        0 4px 0 #3a0800;
+      letter-spacing: 0.18em;
+      margin-bottom: 8px;
+      animation: flicker 4.5s infinite;
     }
 
-    @keyframes pulse {
-      0%, 100% { text-shadow: 0 0 20px #ff3300, 0 0 40px #ff0000, 0 0 80px #cc0000, 0 4px 0 #880000; }
-      50% { text-shadow: 0 0 30px #ff5500, 0 0 60px #ff2200, 0 0 100px #ee0000, 0 4px 0 #aa0000; }
+    @keyframes flicker {
+      0%, 100% { opacity: 1; }
+      88% { opacity: 1; }
+      89% { opacity: 0.55; }
+      90% { opacity: 1; }
+      94% { opacity: 0.75; }
+      95% { opacity: 1; }
     }
 
     #title-screen .subtitle {
-      font-size: 22px;
-      color: #c8a000;
-      letter-spacing: 8px;
-      margin-bottom: 40px;
+      font-size: clamp(13px, 2.6vw, 20px);
+      color: #8a6e00;
+      letter-spacing: 0.45em;
+      margin-bottom: 28px;
     }
 
     #title-screen .tagline {
-      font-size: 14px;
-      color: #886600;
-      margin-bottom: 60px;
+      font-size: clamp(11px, 2vw, 14px);
+      color: #5e4a3a;
+      margin-bottom: 42px;
       font-style: italic;
+      max-width: 520px;
+      line-height: 1.7;
     }
 
     .menu-item {
-      font-size: 24px;
-      color: #888;
+      font-size: clamp(18px, 3vw, 24px);
+      color: #777;
       cursor: pointer;
-      padding: 10px 40px;
+      padding: 12px 44px;
       margin: 5px;
       transition: all 0.2s;
       border: 1px solid transparent;
+      letter-spacing: 0.08em;
     }
 
-    .menu-item:hover {
+    .menu-item:hover, .menu-item:active {
       color: #ffcc00;
-      border-color: #c8a000;
-      background: rgba(200, 160, 0, 0.1);
+      border-color: #7a6200;
+      background: rgba(200, 160, 0, 0.07);
+      text-shadow: 0 0 12px rgba(255, 200, 0, 0.4);
+    }
+
+    .ornament {
+      width: min(400px, 70vw);
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #7a6200, transparent);
+      margin: 14px 0;
     }
 
     .controls-info {
-      position: absolute;
-      bottom: 30px;
-      font-size: 11px;
-      color: #555;
+      font-size: 12px;
+      color: #4a3c2e;
       text-align: center;
       line-height: 1.8;
+      margin-top: 26px;
     }
 
-    .controls-info span {
-      color: #886600;
-    }
+    .controls-info span { color: #8a6e00; }
+    .controls-info b { color: #c8a000; }
 
+    /* ---------- Game canvases ---------- */
     #game-container {
       display: none;
-      position: relative;
+      position: fixed;
+      inset: 0;
     }
 
-    canvas {
-      display: block;
-      image-rendering: pixelated;
-      cursor: none;
-    }
-
-    #loading {
-      display: none;
+    #game-canvas, #hud-canvas {
       position: absolute;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: #0a0a0a;
-      z-index: 20;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    #game-canvas { cursor: none; }
+
+    #hud-canvas {
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    /* ---------- Story overlay ---------- */
+    #story-screen {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      background: radial-gradient(ellipse at center, rgba(8, 4, 2, 0.96), rgba(0, 0, 0, 0.99));
       flex-direction: column;
       align-items: center;
       justify-content: center;
+      padding: 24px;
+      cursor: pointer;
     }
 
-    #loading.active {
-      display: flex;
+    #story-title {
+      font-size: clamp(26px, 6vw, 44px);
+      color: #b81c00;
+      letter-spacing: 0.3em;
+      margin-bottom: 30px;
+      text-shadow: 0 0 24px rgba(255, 60, 0, 0.4);
     }
 
-    #loading h2 {
-      color: #c8a000;
-      font-size: 24px;
-      margin-bottom: 20px;
+    #story-text {
+      white-space: pre-wrap;
+      font-size: clamp(13px, 2.4vw, 17px);
+      line-height: 1.9;
+      color: #b09a60;
+      max-width: 700px;
+      text-align: center;
+      min-height: 40vh;
     }
 
-    .loading-bar {
-      width: 300px;
-      height: 20px;
-      border: 2px solid #c8a000;
-      position: relative;
+    #story-hint {
+      margin-top: 28px;
+      font-size: 13px;
+      color: #6a5a3a;
+      letter-spacing: 0.2em;
+      opacity: 0;
+      transition: opacity 0.6s;
+      animation: hintpulse 1.8s ease-in-out infinite;
     }
 
-    .loading-fill {
-      height: 100%;
-      background: #c8a000;
-      width: 0%;
-      transition: width 0.3s;
+    @keyframes hintpulse {
+      0%, 100% { color: #6a5a3a; }
+      50% { color: #c8a000; }
     }
 
-    /* Ornamental borders */
-    .ornament {
-      width: 400px;
-      height: 2px;
-      background: linear-gradient(90deg, transparent, #c8a000, transparent);
-      margin: 15px 0;
-    }
-
-    /* Mobile controls overlay */
-    #mobile-controls {
+    /* ---------- Touch controls ---------- */
+    #touch-controls {
       display: none;
       position: fixed;
-      bottom: 70px;
-      left: 0;
-      right: 0;
-      z-index: 5;
-      pointer-events: none;
+      inset: 0;
+      z-index: 10;
     }
 
-    .touch-btn {
-      width: 56px;
-      height: 56px;
-      border: 2px solid rgba(200, 160, 0, 0.4);
-      background: rgba(0, 0, 0, 0.3);
-      border-radius: 8px;
-      color: #c8a000;
-      font-size: 22px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      pointer-events: all;
-      user-select: none;
-      -webkit-user-select: none;
+    #touch-zone {
+      position: absolute;
+      inset: 0;
       touch-action: none;
     }
 
-    .touch-btn:active {
-      background: rgba(200, 160, 0, 0.2);
+    #joy-base {
+      display: none;
+      position: fixed;
+      width: 140px;
+      height: 140px;
+      border: 2px solid rgba(200, 160, 0, 0.35);
+      background: rgba(0, 0, 0, 0.25);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 11;
     }
 
-    .dpad {
+    #joy-nub {
       position: absolute;
-      left: 20px;
-      bottom: 0;
-      display: grid;
-      grid-template-columns: 56px 56px 56px;
-      grid-template-rows: 56px 56px 56px;
-      gap: 4px;
+      left: 45px;
+      top: 45px;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: rgba(200, 160, 0, 0.45);
+      border: 2px solid rgba(255, 220, 80, 0.6);
     }
 
-    .action-btns {
-      position: absolute;
-      right: 20px;
-      bottom: 0;
+    .touch-btn {
+      position: fixed;
       display: flex;
-      flex-direction: column;
-      gap: 8px;
-      align-items: flex-end;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      border: 2px solid rgba(200, 160, 0, 0.45);
+      background: rgba(10, 5, 0, 0.45);
+      color: #c8a000;
+      font-family: 'Courier New', monospace;
+      font-weight: bold;
+      z-index: 12;
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
     }
 
-    .action-row {
-      display: flex;
-      gap: 8px;
+    .touch-btn:active { background: rgba(200, 160, 0, 0.25); }
+
+    #btn-fire {
+      right: 26px;
+      bottom: 30px;
+      width: 92px;
+      height: 92px;
+      font-size: 17px;
+      border-color: rgba(255, 60, 30, 0.55);
+      color: #ff5533;
+      background: rgba(60, 5, 0, 0.45);
+    }
+
+    #btn-weapon {
+      right: 140px;
+      bottom: 44px;
+      width: 60px;
+      height: 60px;
+      font-size: 13px;
+    }
+
+    #btn-interact {
+      right: 52px;
+      bottom: 142px;
+      width: 64px;
+      height: 64px;
+      font-size: 15px;
+      border-color: rgba(80, 200, 120, 0.5);
+      color: #55cc88;
+    }
+
+    #btn-map {
+      left: 18px;
+      top: 18px;
+      width: 52px;
+      height: 52px;
+      font-size: 12px;
+    }
+
+    #btn-pause {
+      right: 18px;
+      top: 18px;
+      width: 52px;
+      height: 52px;
+      font-size: 16px;
     }
 
     @media (pointer: coarse) {
-      #mobile-controls { display: block; }
+      #title-screen .controls-info { display: none; }
     }
   </style>
 </head>
 <body>
 
-  <div id="loading">
-    <h2>VIDHI</h2>
-    <div class="loading-bar">
-      <div class="loading-fill" id="loading-fill"></div>
-    </div>
-  </div>
-
   <div id="title-screen">
     <h1>VIDHI</h1>
     <div class="subtitle">VIDHIYAI ETHIRKOL</div>
     <div class="ornament"></div>
-    <div class="tagline">"Confront your fate in the temples of the ancient Asuras"</div>
+    <div class="tagline">"His final letter warned: do not open the temple.<br>The sealed door stands open."</div>
 
     <div class="menu-item" id="btn-start">THODANGU / START</div>
     <div class="menu-item" id="btn-controls">KATTUPPAADUGAL / CONTROLS</div>
 
-    <div class="controls-info" id="controls-detail" style="display:none; position:static; margin-top:30px; color:#886600; font-size:13px;">
-      <span>WASD</span> - Move &nbsp; | &nbsp; <span>Mouse</span> - Look<br>
-      <span>Left Click</span> - Fire &nbsp; | &nbsp; <span>1-4</span> - Switch Weapon<br>
-      <span>E</span> - Interact &nbsp; | &nbsp; <span>M</span> - Padam (Map) &nbsp; | &nbsp; <span>ESC</span> - Pause<br>
+    <div class="controls-info" id="controls-detail" style="display:none;">
+      <span>WASD</span> - Move &nbsp; | &nbsp; <span>Mouse</span> - Look &nbsp; | &nbsp; <span>Left Click</span> - Fire<br>
+      <span>1-4</span> - Weapons &nbsp; | &nbsp; <span>E</span> - Open doors / secrets &nbsp; | &nbsp; <span>M</span> - Padam (Map) &nbsp; | &nbsp; <span>ESC</span> - Pause<br>
       <br>
-      <b style="color:#c8a000;">WEAPONS:</b><br>
-      <span>1</span> Trishul (Trident) &nbsp; | &nbsp; <span>2</span> Agni (Fire)<br>
-      <span>3</span> Sudarshana Chakra &nbsp; | &nbsp; <span>4</span> Brahmastra<br>
+      <b>WEAPONS:</b> Trishul &middot; Agni &middot; Sudarshana Chakra &middot; Brahmastra<br>
+      <b>ENEMIES:</b> Asura &middot; Naga (spits venom) &middot; Rakshasa &middot; Mahishasura<br>
       <br>
-      <b style="color:#c8a000;">ENEMIES:</b><br>
-      Asura - Basic demon &nbsp; | &nbsp; Naga - Serpent warrior<br>
-      Rakshasa - Heavy demon &nbsp; | &nbsp; Mahishasura - BOSS
+      Locked doors need keys. Secret walls hide treasures &mdash; press <span>E</span> on suspicious stone.<br>
+      On phones: left thumb moves, right thumb looks; FIRE and E buttons on screen.
     </div>
 
-    <div class="controls-info">
-      <span>Arrow Keys / Q,R</span> also work for rotation<br>
-      A Tamil-themed tribute to the classics
-    </div>
+    <div class="controls-info">A Tamil horror tribute to the classics</div>
+  </div>
+
+  <div id="story-screen">
+    <div id="story-title"></div>
+    <div id="story-text"></div>
+    <div id="story-hint">THODARA &middot; TAP / PRESS ENTER</div>
   </div>
 
   <div id="game-container">
     <canvas id="game-canvas"></canvas>
+    <canvas id="hud-canvas"></canvas>
   </div>
 
-  <div id="mobile-controls">
-    <div class="dpad">
-      <div></div>
-      <div class="touch-btn" data-key="KeyW">W</div>
-      <div></div>
-      <div class="touch-btn" data-key="KeyA">A</div>
-      <div></div>
-      <div class="touch-btn" data-key="KeyD">D</div>
-      <div></div>
-      <div class="touch-btn" data-key="KeyS">S</div>
-      <div></div>
-    </div>
-    <div class="action-btns">
-      <div class="action-row">
-        <div class="touch-btn" data-key="ArrowLeft" style="width:48px;height:48px;font-size:16px;">&#8592;</div>
-        <div class="touch-btn" data-action="fire" style="width:72px;height:72px;font-size:14px;background:rgba(200,0,0,0.2);">FIRE</div>
-        <div class="touch-btn" data-key="ArrowRight" style="width:48px;height:48px;font-size:16px;">&#8594;</div>
-      </div>
-      <div class="action-row">
-        <div class="touch-btn" data-key="Digit1" style="width:40px;height:40px;font-size:14px;">1</div>
-        <div class="touch-btn" data-key="Digit2" style="width:40px;height:40px;font-size:14px;">2</div>
-        <div class="touch-btn" data-key="Digit3" style="width:40px;height:40px;font-size:14px;">3</div>
-        <div class="touch-btn" data-key="Digit4" style="width:40px;height:40px;font-size:14px;">4</div>
-      </div>
-    </div>
+  <div id="touch-controls">
+    <div id="touch-zone"></div>
+    <div id="joy-base"><div id="joy-nub"></div></div>
+    <div class="touch-btn" id="btn-fire">FIRE</div>
+    <div class="touch-btn" id="btn-weapon">WPN</div>
+    <div class="touch-btn" id="btn-interact">E</div>
+    <div class="touch-btn" id="btn-map">MAP</div>
+    <div class="touch-btn" id="btn-pause">II</div>
   </div>
 
   <script type="module">
     import { Game } from './src/game.js';
+    import { StoryScreen } from './src/story.js';
+    import { TouchControls } from './src/touch.js';
+    import { isTouchDevice } from './src/constants.js';
 
     const titleScreen = document.getElementById('title-screen');
     const gameContainer = document.getElementById('game-container');
-    const canvas = document.getElementById('game-canvas');
+    const glCanvas = document.getElementById('game-canvas');
+    const hudCanvas = document.getElementById('hud-canvas');
     const btnStart = document.getElementById('btn-start');
     const btnControls = document.getElementById('btn-controls');
     const controlsDetail = document.getElementById('controls-detail');
 
-    // Responsive canvas sizing
-    function resizeCanvas() {
-      const maxW = Math.min(window.innerWidth, 960);
-      const maxH = Math.min(window.innerHeight, 600);
-      const aspect = 16 / 10;
-
-      let w = maxW;
-      let h = w / aspect;
-      if (h > maxH) {
-        h = maxH;
-        w = h * aspect;
-      }
-
-      canvas.width = Math.floor(w);
-      canvas.height = Math.floor(h);
-    }
-
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
-
     let game = null;
+
+    function resize() {
+      const w = window.innerWidth;
+      const h = window.innerHeight;
+      if (game) game.onResize(w, h);
+    }
+    window.addEventListener('resize', resize);
 
     btnControls.addEventListener('click', () => {
       controlsDetail.style.display = controlsDetail.style.display === 'none' ? 'block' : 'none';
@@ -316,53 +360,23 @@
     btnStart.addEventListener('click', () => {
       titleScreen.style.display = 'none';
       gameContainer.style.display = 'block';
-      resizeCanvas();
 
-      game = new Game(canvas);
+      const story = new StoryScreen();
+      game = new Game(glCanvas, hudCanvas, story);
+      resize();
+
+      if (isTouchDevice()) {
+        document.getElementById('touch-controls').style.display = 'block';
+        new TouchControls(game);
+        // Try fullscreen for an uncluttered view; ignore refusal
+        document.documentElement.requestFullscreen?.().catch(() => {});
+      }
+
       game.start();
 
-      // Auto-lock pointer on start
-      canvas.requestPointerLock();
-    });
-
-    // Mobile touch controls
-    const touchBtns = document.querySelectorAll('.touch-btn');
-    const activeKeys = {};
-
-    function simulateKey(code, down) {
-      const event = new KeyboardEvent(down ? 'keydown' : 'keyup', { code });
-      document.dispatchEvent(event);
-    }
-
-    touchBtns.forEach(btn => {
-      const key = btn.dataset.key;
-      const action = btn.dataset.action;
-
-      const onStart = (e) => {
-        e.preventDefault();
-        if (key) {
-          simulateKey(key, true);
-          activeKeys[key] = true;
-        }
-        if (action === 'fire' && game) {
-          game.shooting = true;
-        }
-      };
-
-      const onEnd = (e) => {
-        e.preventDefault();
-        if (key) {
-          simulateKey(key, false);
-          delete activeKeys[key];
-        }
-        if (action === 'fire' && game) {
-          game.shooting = false;
-        }
-      };
-
-      btn.addEventListener('touchstart', onStart, { passive: false });
-      btn.addEventListener('touchend', onEnd, { passive: false });
-      btn.addEventListener('touchcancel', onEnd, { passive: false });
+      if (!isTouchDevice()) {
+        glCanvas.requestPointerLock?.();
+      }
     });
   </script>
 </body>
