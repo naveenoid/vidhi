@@ -10,7 +10,7 @@ export const ROT_SPEED = 2.4;         // radians per second (keyboard)
 export const MOUSE_SENSITIVITY = 0.0022;
 export const PLAYER_RADIUS = 12;      // game units
 export const EYE_HEIGHT = 0.5;        // tiles
-export const WALL_HEIGHT = 1.0;       // tiles
+export const WALL_HEIGHT = 1.4;       // tiles (tall temple halls; boss fits under)
 export const MAX_PITCH = 0.55;        // radians
 
 // Tile codes

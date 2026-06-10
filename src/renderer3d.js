@@ -129,7 +129,7 @@ export class Renderer3D {
         b.norm.push(nx, 0, nz);
         b.col.push(tint, tint, tint);
       }
-      b.uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+      b.uv.push(0, 0, 1, 0, 1, WALL_HEIGHT, 0, WALL_HEIGHT);
       b.idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
     };
 
@@ -278,7 +278,7 @@ export class Renderer3D {
   }
 
   _enemyMesh(sprite) {
-    const size = sprite.boss ? 1.7 : 1.0;
+    const size = sprite.boss ? 1.35 : 1.0;
     const geo = new THREE.PlaneGeometry(size, size);
     const mat = new THREE.MeshLambertMaterial({
       map: this.frames.enemies[sprite.boss ? 'boss' : sprite.type].idle[0],

@@ -204,7 +204,10 @@ class Game {
       this.sound.duck(0.25, 0.3);
       this.loadLevel(0); // build the world behind the story screen
       this.gameLoop(this.lastTime);
-      this.story.show(STORY.intro, () => this.sound.duck(1, 0.8));
+      this.story.show(STORY.intro, () => {
+        this.sound.duck(1, 0.8);
+        if (!this.touch) this.glCanvas.requestPointerLock?.();
+      });
     } else {
       begin();
     }

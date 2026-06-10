@@ -372,11 +372,8 @@
         document.documentElement.requestFullscreen?.().catch(() => {});
       }
 
+      // Pointer lock is requested when the intro story closes
       game.start();
-
-      if (!isTouchDevice()) {
-        glCanvas.requestPointerLock?.();
-      }
     });
   </script>
 </body>
