@@ -1,34 +1,38 @@
 // Vidhi - Main Game Logic
-import { RaycastEngine, TILE_SIZE, FOV, HALF_FOV } from './engine.js';
+// The simulation is 2D and tile-based (positions in TILE_SIZE units);
+// Renderer3D draws the world, Hud draws the overlay.
+
+import {
+  TILE_SIZE, MOVE_SPEED, ROT_SPEED, MOUSE_SENSITIVITY, PLAYER_RADIUS,
+  MAX_PITCH, KEY_FOR_DOOR, T_SECRET, isTouchDevice,
+} from './constants.js';
+import { Renderer3D } from './renderer3d.js';
+import { Hud } from './hud.js';
 import { loadLevel } from './maps.js';
 import { SoundManager } from './sound.js';
+import { STORY } from './story.js';
 
-const MOVE_SPEED = 3;
-const ROT_SPEED = 0.04;
-const MOUSE_SENSITIVITY = 0.002;
-const PLAYER_RADIUS = 10;
+const WEAPON_ORDER = ['trishul', 'agni', 'chakra', 'brahmastra'];
 
 class Game {
-  constructor(canvas) {
-    this.canvas = canvas;
-    this.engine = new RaycastEngine(canvas);
+  constructor(glCanvas, hudCanvas, story) {
+    this.glCanvas = glCanvas;
+    this.hudCanvas = hudCanvas;
+    this.renderer = new Renderer3D(glCanvas);
+    this.hud = new Hud(hudCanvas);
     this.sound = new SoundManager();
+    this.story = story || null;
+    this.touch = isTouchDevice();
 
     this.player = {
-      x: 0, y: 0, angle: 0,
+      x: 0, y: 0, angle: 0, pitch: 0,
       health: 100, armor: 0,
-      vx: 0, vy: 0,
     };
 
     this.gameState = {
       currentWeapon: 'trishul',
       weapons: ['trishul'],
-      ammo: {
-        trishul: Infinity,
-        agni: 0,
-        chakra: 0,
-        brahmastra: 0,
-      },
+      ammo: { trishul: Infinity, agni: 0, chakra: 0, brahmastra: 0 },
       fireAnim: 0,
       walkCycle: 0,
       time: 0,
@@ -36,6 +40,8 @@ class Game {
       levelName: '',
       kills: 0,
       totalEnemies: 0,
+      secretsFound: 0,
+      totalSecrets: 0,
       keys: { red: false, blue: false, gold: false },
       paused: false,
       gameOver: false,
@@ -44,8 +50,7 @@ class Game {
       messageTimer: 0,
       screenFlash: 0,
       screenFlashColor: 'red',
-      damageDir: 0,
-      // Phase 0: navigation cues + screen shake + exit portal
+      damageRel: 0,
       exit: null,
       mapExpanded: false,
       screenShakeMag: 0,
@@ -54,13 +59,17 @@ class Game {
 
     this.sprites = [];
     this.map = null;
+    this.doors = [];
     this.levelExit = null;
 
     this.keys = {};
-    this.mouse = { dx: 0, locked: false };
+    this.mouse = { dx: 0, dy: 0, locked: false };
+    this.moveInput = { x: 0, y: 0 }; // analog (touch joystick)
+    this.lookInput = { yaw: 0, pitch: 0 }; // analog (touch swipe)
     this.shooting = false;
     this.fireCooldown = 0;
     this.projectiles = [];
+    this.enemyProjectiles = [];
 
     this.lastTime = 0;
     this.running = false;
@@ -71,7 +80,6 @@ class Game {
   setupInput() {
     document.addEventListener('keydown', (e) => {
       this.keys[e.code] = true;
-      // Weapon switching
       if (e.code === 'Digit1') this.switchWeapon('trishul');
       if (e.code === 'Digit2') this.switchWeapon('agni');
       if (e.code === 'Digit3') this.switchWeapon('chakra');
@@ -79,6 +87,7 @@ class Game {
       if (e.code === 'KeyE') this.interact();
       if (e.code === 'KeyM') this.gameState.mapExpanded = !this.gameState.mapExpanded;
       if (e.code === 'Escape') {
+        if (this.story && this.story.active) return; // story handles its own keys
         if (this.gameState.gameOver || this.gameState.victory) {
           this.restart();
         } else {
@@ -86,6 +95,7 @@ class Game {
         }
       }
       if (e.code === 'Enter' && (this.gameState.gameOver || this.gameState.victory)) {
+        if (this.story && this.story.active) return;
         this.restart();
       }
     });
@@ -94,33 +104,42 @@ class Game {
       this.keys[e.code] = false;
     });
 
-    this.canvas.addEventListener('click', () => {
-      if (!this.mouse.locked) {
-        this.canvas.requestPointerLock();
-      }
-    });
+    if (!this.touch) {
+      this.glCanvas.addEventListener('click', () => {
+        if (!this.mouse.locked) {
+          this.glCanvas.requestPointerLock();
+        }
+      });
 
-    document.addEventListener('pointerlockchange', () => {
-      this.mouse.locked = document.pointerLockElement === this.canvas;
-    });
+      document.addEventListener('pointerlockchange', () => {
+        this.mouse.locked = document.pointerLockElement === this.glCanvas;
+      });
 
-    document.addEventListener('mousemove', (e) => {
-      if (this.mouse.locked) {
-        this.mouse.dx += e.movementX;
-      }
-    });
+      document.addEventListener('mousemove', (e) => {
+        if (this.mouse.locked) {
+          this.mouse.dx += e.movementX;
+          this.mouse.dy += e.movementY;
+        }
+      });
 
-    document.addEventListener('mousedown', (e) => {
-      if (this.mouse.locked && e.button === 0) {
-        this.shooting = true;
-      }
-    });
+      document.addEventListener('mousedown', (e) => {
+        if (this.mouse.locked && e.button === 0) {
+          this.shooting = true;
+        }
+      });
 
-    document.addEventListener('mouseup', (e) => {
-      if (e.button === 0) {
-        this.shooting = false;
-      }
-    });
+      document.addEventListener('mouseup', (e) => {
+        if (e.button === 0) {
+          this.shooting = false;
+        }
+      });
+    }
+  }
+
+  onResize(w, h) {
+    this.renderer.onResize(w, h);
+    this.hudCanvas.width = w;
+    this.hudCanvas.height = h;
   }
 
   switchWeapon(weapon) {
@@ -130,19 +149,40 @@ class Game {
     }
   }
 
-  interact() {
-    // Check for nearby doors or interactive objects
-    const checkDist = TILE_SIZE * 1.5;
-    const checkX = this.player.x + Math.cos(this.player.angle) * checkDist;
-    const checkY = this.player.y + Math.sin(this.player.angle) * checkDist;
-    const mapX = Math.floor(checkX / TILE_SIZE);
-    const mapY = Math.floor(checkY / TILE_SIZE);
+  cycleWeapon() {
+    const owned = WEAPON_ORDER.filter((w) => this.gameState.weapons.includes(w));
+    const i = owned.indexOf(this.gameState.currentWeapon);
+    this.switchWeapon(owned[(i + 1) % owned.length]);
+  }
 
-    if (this.map && this.map.getTile(mapX, mapY) === 5) {
-      // Door
-      this.map.setTile(mapX, mapY, 0);
-      this.sound.play('door');
-      this.showMessage('KATHAVU THIRANDHADHU', 2);
+  interact() {
+    // Look for a door in the facing direction (close or one tile out)
+    for (const reach of [0.8, 1.5]) {
+      const checkX = this.player.x + Math.cos(this.player.angle) * reach * TILE_SIZE;
+      const checkY = this.player.y + Math.sin(this.player.angle) * reach * TILE_SIZE;
+      const mapX = Math.floor(checkX / TILE_SIZE);
+      const mapY = Math.floor(checkY / TILE_SIZE);
+      const door = this.doors.find((d) => d.x === mapX && d.y === mapY && !d.opening);
+      if (!door) continue;
+
+      const needed = KEY_FOR_DOOR[door.tile];
+      if (needed && !this.gameState.keys[needed]) {
+        this.sound.play('locked');
+        const keyNames = { red: 'SEVI', blue: 'NEELA', gold: 'THANGA' };
+        this.showMessage(`POOTTAPPATTADHU - ${keyNames[needed]} SAAVI THEVAI!`, 2.5);
+        return;
+      }
+
+      door.opening = true;
+      if (door.tile === T_SECRET) {
+        this.gameState.secretsFound++;
+        this.sound.play('secret');
+        this.showMessage('RAGASIYAM KANDUPIDIKKAPPATTADHU!', 2.5);
+      } else {
+        this.sound.play('door');
+        this.showMessage('KATHAVU THIRANDHADHU', 2);
+      }
+      return;
     }
   }
 
@@ -152,19 +192,36 @@ class Game {
   }
 
   start() {
-    this.loadLevel(0);
     this.running = true;
     this.lastTime = performance.now();
-    this.gameLoop(this.lastTime);
+    this.sound.init();
+    this.sound.startAmbient();
+    const begin = () => {
+      this.loadLevel(0);
+      this.gameLoop(this.lastTime);
+    };
+    if (this.story) {
+      this.sound.duck(0.25, 0.3);
+      this.loadLevel(0); // build the world behind the story screen
+      this.gameLoop(this.lastTime);
+      this.story.show(STORY.intro, () => {
+        this.sound.duck(1, 0.8);
+        if (!this.touch) this.glCanvas.requestPointerLock?.();
+      });
+    } else {
+      begin();
+    }
   }
 
   restart() {
     this.player.health = 100;
     this.player.armor = 0;
+    this.player.pitch = 0;
     this.gameState.currentWeapon = 'trishul';
     this.gameState.weapons = ['trishul'];
     this.gameState.ammo = { trishul: Infinity, agni: 0, chakra: 0, brahmastra: 0 };
     this.gameState.kills = 0;
+    this.gameState.secretsFound = 0;
     this.gameState.keys = { red: false, blue: false, gold: false };
     this.gameState.gameOver = false;
     this.gameState.victory = false;
@@ -173,6 +230,8 @@ class Game {
     this.gameState.particles = [];
     this.gameState.screenShakeMag = 0;
     this.projectiles = [];
+    this.enemyProjectiles = [];
+    this.sound.setHeartbeat(false);
     this.loadLevel(0);
   }
 
@@ -185,18 +244,24 @@ class Game {
 
     this.map = level.map;
     this.sprites = level.sprites;
+    this.doors = level.doors;
     this.player.x = level.playerStart.x;
     this.player.y = level.playerStart.y;
     this.player.angle = level.playerStart.angle;
+    this.player.pitch = 0;
     this.gameState.levelName = level.levelName;
     this.gameState.level = index + 1;
     this.gameState.totalEnemies = level.totalEnemies;
+    this.gameState.totalSecrets = level.totalSecrets;
     this.gameState.kills = 0;
     this.levelExit = level.exit;
     this.gameState.exit = level.exit;
     this.gameState.particles = [];
     this.gameState.screenShakeMag = 0;
     this.projectiles = [];
+    this.enemyProjectiles = [];
+
+    this.renderer.loadLevel(this.map, level.levelDef, this.doors);
 
     // Give weapons on later levels
     if (index >= 1 && !this.gameState.weapons.includes('agni')) {
@@ -219,57 +284,69 @@ class Game {
     const dt = Math.min((timestamp - this.lastTime) / 1000, 0.05);
     this.lastTime = timestamp;
 
-    if (!this.gameState.paused && !this.gameState.gameOver && !this.gameState.victory) {
+    const storyActive = this.story && this.story.active;
+    if (!storyActive && !this.gameState.paused && !this.gameState.gameOver && !this.gameState.victory) {
       this.update(dt);
     }
 
-    this.render();
+    this.render(dt);
     requestAnimationFrame((t) => this.gameLoop(t));
   }
 
   update(dt) {
     this.gameState.time += dt;
 
-    // Mouse rotation
-    this.player.angle += this.mouse.dx * MOUSE_SENSITIVITY;
+    // Look: mouse (pointer lock) + touch swipe + keyboard turn
+    this.player.angle += this.mouse.dx * MOUSE_SENSITIVITY + this.lookInput.yaw;
+    this.player.pitch -= this.mouse.dy * MOUSE_SENSITIVITY;
+    this.player.pitch += this.lookInput.pitch;
+    this.player.pitch = Math.max(-MAX_PITCH, Math.min(MAX_PITCH, this.player.pitch));
     this.mouse.dx = 0;
+    this.mouse.dy = 0;
+    this.lookInput.yaw = 0;
+    this.lookInput.pitch = 0;
 
-    // Keyboard rotation
-    if (this.keys['ArrowLeft'] || this.keys['KeyQ']) {
-      this.player.angle -= ROT_SPEED;
-    }
-    if (this.keys['ArrowRight'] || this.keys['KeyR']) {
-      this.player.angle += ROT_SPEED;
+    if (this.keys['ArrowLeft'] || this.keys['KeyQ']) this.player.angle -= ROT_SPEED * dt;
+    if (this.keys['ArrowRight'] || this.keys['KeyR']) this.player.angle += ROT_SPEED * dt;
+
+    // Movement: keyboard digital + joystick analog
+    let fwd = this.moveInput.y;
+    let strafe = this.moveInput.x;
+    if (this.keys['KeyW'] || this.keys['ArrowUp']) fwd += 1;
+    if (this.keys['KeyS'] || this.keys['ArrowDown']) fwd -= 1;
+    if (this.keys['KeyA']) strafe -= 1;
+    if (this.keys['KeyD']) strafe += 1;
+    const mag = Math.hypot(fwd, strafe);
+    if (mag > 1) {
+      fwd /= mag;
+      strafe /= mag;
     }
 
-    // Movement
-    let moveX = 0, moveY = 0;
+    // forward = (cos a, sin a); right = (cos(a+90deg), sin(a+90deg))
     const speed = MOVE_SPEED * TILE_SIZE * dt;
+    const cos = Math.cos(this.player.angle);
+    const sin = Math.sin(this.player.angle);
+    const stepX = (cos * fwd - sin * strafe) * speed;
+    const stepY = (sin * fwd + cos * strafe) * speed;
 
-    if (this.keys['KeyW'] || this.keys['ArrowUp']) {
-      moveX += Math.cos(this.player.angle) * speed;
-      moveY += Math.sin(this.player.angle) * speed;
-    }
-    if (this.keys['KeyS'] || this.keys['ArrowDown']) {
-      moveX -= Math.cos(this.player.angle) * speed;
-      moveY -= Math.sin(this.player.angle) * speed;
-    }
-    if (this.keys['KeyA']) {
-      moveX += Math.cos(this.player.angle - Math.PI / 2) * speed;
-      moveY += Math.sin(this.player.angle - Math.PI / 2) * speed;
-    }
-    if (this.keys['KeyD']) {
-      moveX += Math.cos(this.player.angle + Math.PI / 2) * speed;
-      moveY += Math.sin(this.player.angle + Math.PI / 2) * speed;
+    if (mag > 0.1) {
+      this.gameState.walkCycle += dt * 8 * Math.min(1, mag);
     }
 
-    // Walk cycle for weapon bobbing
-    if (moveX !== 0 || moveY !== 0) {
-      this.gameState.walkCycle += dt * 8;
-    }
+    this.moveWithCollision(stepX, stepY);
 
-    // Collision detection
-    this.moveWithCollision(moveX, moveY);
+    // Doors animate open
+    for (const door of this.doors) {
+      if (!door.opening || door.openT >= 1) {
+        if (door.openT > 0) this.renderer.setDoorOpenT(door.x, door.y, door.openT);
+        continue;
+      }
+      door.openT = Math.min(1, door.openT + dt / 0.8);
+      if (door.openT >= 0.5 && this.map.getTile(door.x, door.y) !== 0) {
+        this.map.setTile(door.x, door.y, 0);
+      }
+      this.renderer.setDoorOpenT(door.x, door.y, door.openT);
+    }
 
     // Shooting
     this.fireCooldown = Math.max(0, this.fireCooldown - dt);
@@ -277,24 +354,16 @@ class Game {
       this.fire();
     }
 
-    // Update fire animation
     if (this.gameState.fireAnim > 0) {
       this.gameState.fireAnim = Math.max(0, this.gameState.fireAnim - dt * 5);
     }
 
-    // Update projectiles
     this.updateProjectiles(dt);
-
-    // Update enemies
+    this.updateEnemyProjectiles(dt);
     this.updateEnemies(dt);
-
-    // Check pickups
     this.checkPickups();
-
-    // Check exit
     this.checkExit();
 
-    // Update messages
     if (this.gameState.messageTimer > 0) {
       this.gameState.messageTimer -= dt;
       if (this.gameState.messageTimer <= 0) {
@@ -302,17 +371,15 @@ class Game {
       }
     }
 
-    // Screen flash
     if (this.gameState.screenFlash > 0) {
       this.gameState.screenFlash = Math.max(0, this.gameState.screenFlash - dt * 3);
     }
 
-    // Screen shake decay
     if (this.gameState.screenShakeMag > 0) {
       this.gameState.screenShakeMag = Math.max(0, this.gameState.screenShakeMag - dt * 18);
     }
 
-    // Particle update (blood + sparks)
+    // Particles: z is height in tiles (0 = floor)
     const particles = this.gameState.particles;
     for (let i = particles.length - 1; i >= 0; i--) {
       const p = particles[i];
@@ -324,16 +391,22 @@ class Game {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.z += p.vz * dt;
-      p.vz += 4 * dt; // gravity pulls particle downward on screen
-      // Air drag
+      p.vz -= 2.6 * dt; // gravity
+      if (p.z < 0.02) {
+        p.z = 0.02;
+        p.vz = 0;
+      }
       p.vx *= 0.92;
       p.vy *= 0.92;
     }
 
-    // Death check
+    // Low-health heartbeat
+    this.sound.setHeartbeat(this.player.health > 0 && this.player.health < 30);
+
     if (this.player.health <= 0) {
       this.player.health = 0;
       this.gameState.gameOver = true;
+      this.sound.setHeartbeat(false);
       this.sound.play('death');
     }
   }
@@ -341,7 +414,6 @@ class Game {
   moveWithCollision(dx, dy) {
     const r = PLAYER_RADIUS;
 
-    // Try X movement
     const newX = this.player.x + dx;
     if (!this.isWall(newX + r, this.player.y) &&
         !this.isWall(newX - r, this.player.y) &&
@@ -352,7 +424,6 @@ class Game {
       this.player.x = newX;
     }
 
-    // Try Y movement
     const newY = this.player.y + dy;
     if (!this.isWall(this.player.x, newY + r) &&
         !this.isWall(this.player.x, newY - r) &&
@@ -367,8 +438,20 @@ class Game {
   isWall(x, y) {
     const mapX = Math.floor(x / TILE_SIZE);
     const mapY = Math.floor(y / TILE_SIZE);
-    const tile = this.map.getTile(mapX, mapY);
-    return tile > 0;
+    return this.map.getTile(mapX, mapY) > 0;
+  }
+
+  // Grid-stepped line of sight between two points
+  hasLOS(x0, y0, x1, y1) {
+    const dist = Math.hypot(x1 - x0, y1 - y0);
+    // At least 2 steps so the midpoint is always checked, even at point-blank
+    // range (e.g. across a wall corner between diagonal tiles).
+    const steps = Math.max(2, Math.ceil(dist / (TILE_SIZE / 2)));
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      if (this.isWall(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t)) return false;
+    }
+    return true;
   }
 
   fire() {
@@ -387,11 +470,12 @@ class Game {
 
     this.gameState.fireAnim = 1;
     this.sound.play('fire_' + weapon);
+    this.renderer.flashMuzzle(weapon);
 
     const weaponDefs = {
-      trishul: { damage: 15, range: 3, spread: 0, cooldown: 0.4, hitscan: true },
-      agni: { damage: 40, range: 6, spread: 0.1, cooldown: 0.8, hitscan: true, pellets: 5 },
-      chakra: { damage: 30, range: 12, spread: 0, cooldown: 0.3, hitscan: false, speed: 10 },
+      trishul: { damage: 18, range: 3, spread: 0, cooldown: 0.35, hitscan: true },
+      agni: { damage: 45, range: 7, spread: 0.1, cooldown: 0.8, hitscan: true, pellets: 5 },
+      chakra: { damage: 30, range: 14, spread: 0, cooldown: 0.3, hitscan: false, speed: 11 },
       brahmastra: { damage: 100, range: 20, spread: 0, cooldown: 1.5, hitscan: false, speed: 6, explosive: true },
     };
 
@@ -419,7 +503,7 @@ class Game {
     }
 
     this.fireCooldown = def.cooldown;
-    this.gameState.screenFlash = 0.2;
+    this.gameState.screenFlash = 0.15;
     this.gameState.screenFlashColor = weapon === 'agni' ? 'orange' : weapon === 'brahmastra' ? 'purple' : 'yellow';
   }
 
@@ -431,10 +515,8 @@ class Game {
       const x = this.player.x + Math.cos(angle) * i * step;
       const y = this.player.y + Math.sin(angle) * i * step;
 
-      // Check wall hit
       if (this.isWall(x, y)) break;
 
-      // Check enemy hit
       for (const sprite of this.sprites) {
         if (!sprite.active || !sprite.health) continue;
         const dx = x - sprite.x;
@@ -456,7 +538,6 @@ class Game {
       proj.y += Math.sin(proj.angle) * moveAmount;
       proj.traveled += moveAmount;
 
-      // Check wall hit
       if (this.isWall(proj.x, proj.y)) {
         if (proj.explosive) {
           this.explode(proj.x, proj.y, proj.damage);
@@ -465,7 +546,6 @@ class Game {
         continue;
       }
 
-      // Check enemy hit
       let hit = false;
       for (const sprite of this.sprites) {
         if (!sprite.active || !sprite.health) continue;
@@ -489,11 +569,51 @@ class Game {
     }
   }
 
+  updateEnemyProjectiles(dt) {
+    for (let i = this.enemyProjectiles.length - 1; i >= 0; i--) {
+      const proj = this.enemyProjectiles[i];
+      const moveAmount = proj.speed * dt;
+      proj.x += Math.cos(proj.angle) * moveAmount;
+      proj.y += Math.sin(proj.angle) * moveAmount;
+      proj.traveled += moveAmount;
+
+      if (this.isWall(proj.x, proj.y) || proj.traveled > proj.range) {
+        this.enemyProjectiles.splice(i, 1);
+        continue;
+      }
+
+      const dx = proj.x - this.player.x;
+      const dy = proj.y - this.player.y;
+      if (dx * dx + dy * dy < 18 * 18) {
+        this.takeDamage(proj.damage, Math.atan2(-dy, -dx));
+        this.enemyProjectiles.splice(i, 1);
+      }
+    }
+  }
+
   explode(x, y, damage) {
     const radius = TILE_SIZE * 3;
     this.sound.play('explode');
     this.gameState.screenFlash = 0.5;
     this.gameState.screenFlashColor = 'white';
+    this.gameState.screenShakeMag = Math.max(this.gameState.screenShakeMag, 10);
+
+    // Spark burst
+    for (let p = 0; p < 18; p++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = 60 + Math.random() * 160;
+      this.gameState.particles.push({
+        x, y,
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+        z: 0.3 + Math.random() * 0.4,
+        vz: 0.8 + Math.random() * 1.4,
+        life: 0.5 + Math.random() * 0.4,
+        maxLife: 0.9,
+        size: 3,
+        color: p % 2 ? '#ffaa33' : '#ff5511',
+      });
+    }
 
     for (const sprite of this.sprites) {
       if (!sprite.active || !sprite.health) continue;
@@ -506,7 +626,6 @@ class Game {
       }
     }
 
-    // Self damage
     const pdx = x - this.player.x;
     const pdy = y - this.player.y;
     const pdist = Math.sqrt(pdx * pdx + pdy * pdy);
@@ -520,10 +639,10 @@ class Game {
     sprite.health -= damage;
     sprite.hurt = true;
     sprite.hurtTimer = 0.25;
-    sprite.state = 'chase';
+    if (sprite.state === 'idle') sprite.state = 'chase';
     this.sound.play('hit');
+    this.hud.showHitMarker();
 
-    // Knockback away from player
     const kdx = sprite.x - this.player.x;
     const kdy = sprite.y - this.player.y;
     const klen = Math.sqrt(kdx * kdx + kdy * kdy) || 1;
@@ -531,7 +650,6 @@ class Game {
     sprite.knockX = (kdx / klen) * knockMag;
     sprite.knockY = (kdy / klen) * knockMag;
 
-    // Blood particle burst at the impact point
     const burstCount = 6 + Math.floor(damage / 10);
     for (let p = 0; p < burstCount; p++) {
       const a = Math.random() * Math.PI * 2;
@@ -541,8 +659,8 @@ class Game {
         y: sprite.y,
         vx: Math.cos(a) * sp,
         vy: Math.sin(a) * sp,
-        z: 0.4 + Math.random() * 0.4,    // vertical position 0..1 of sprite height
-        vz: -1.2 - Math.random() * 0.6,   // gravity (positive = down on screen)
+        z: 0.35 + Math.random() * 0.35,
+        vz: 0.4 + Math.random() * 1.0,
         life: 0.45 + Math.random() * 0.3,
         maxLife: 0.7,
         size: 2 + Math.random() * 3,
@@ -550,33 +668,39 @@ class Game {
       });
     }
 
-    // Tiny screen shake on every hit, more on boss hit
     this.gameState.screenShakeMag = Math.max(
       this.gameState.screenShakeMag,
-      sprite.boss ? 4 : 2
+      sprite.boss ? 4 : 2,
     );
 
     if (sprite.health <= 0) {
       sprite.active = false;
       sprite.health = 0;
+      sprite.state = 'dying';
+      sprite.deathT = 0;
       this.gameState.kills++;
       this.sound.play('enemyDeath');
 
       if (sprite.boss) {
         this.gameState.screenShakeMag = Math.max(this.gameState.screenShakeMag, 14);
         this.showMessage('MAHISHASURA VEEZHNDHAAN!', 5);
-        // Drop brahmastra on boss kill
+        // The boss carries the gold key to the sanctum
+        this.sprites.push({
+          type: 'key',
+          x: sprite.x,
+          y: sprite.y,
+          active: true,
+          color: 'gold',
+        });
         if (!this.gameState.weapons.includes('brahmastra')) {
           this.gameState.weapons.push('brahmastra');
           this.gameState.ammo.brahmastra = 10;
-          this.showMessage('BRAHMASTRA KIDAITHHADHU!', 5);
         }
       }
     }
   }
 
   takeDamage(damage, direction) {
-    // Armor absorbs some damage
     if (this.player.armor > 0) {
       const absorbed = Math.min(this.player.armor, damage * 0.5);
       this.player.armor -= absorbed;
@@ -586,7 +710,12 @@ class Game {
     this.player.health -= damage;
     this.gameState.screenFlash = 0.4;
     this.gameState.screenFlashColor = 'red';
-    this.gameState.damageDir = direction;
+    // Direction the hit came FROM, relative to facing (for the vignette)
+    let rel = direction - Math.PI - this.player.angle;
+    while (rel > Math.PI) rel -= 2 * Math.PI;
+    while (rel < -Math.PI) rel += 2 * Math.PI;
+    this.gameState.damageRel = rel;
+    this.gameState.screenShakeMag = Math.max(this.gameState.screenShakeMag, 5);
     this.sound.play('hurt');
   }
 
@@ -594,15 +723,19 @@ class Game {
     const enemyTypes = { asura: true, naga: true, rakshasa: true };
 
     for (const sprite of this.sprites) {
-      if (!sprite.active || !sprite.health) continue;
+      // Death animation plays out, then the corpse fades away
+      if (sprite.state === 'dying') {
+        sprite.deathT = (sprite.deathT || 0) + dt / 1.0;
+        if (sprite.deathT >= 1) sprite.state = 'dead';
+        continue;
+      }
+      if (!sprite.active || !sprite.health || !enemyTypes[sprite.type]) continue;
 
-      // Update hurt flash
       if (sprite.hurtTimer > 0) {
         sprite.hurtTimer -= dt;
         if (sprite.hurtTimer <= 0) sprite.hurt = false;
       }
 
-      // Attack cooldown
       if (sprite.attackCooldown > 0) {
         sprite.attackCooldown -= dt;
       }
@@ -612,7 +745,7 @@ class Game {
       const dist = Math.sqrt(dx * dx + dy * dy);
       const tileDist = dist / TILE_SIZE;
 
-      // --- Apply lingering knockback impulse from being hit ---
+      // Lingering knockback
       if (sprite.knockX || sprite.knockY) {
         const kx = sprite.knockX || 0;
         const ky = sprite.knockY || 0;
@@ -626,65 +759,103 @@ class Game {
         }
       }
 
-      // Alert range
-      if (tileDist < sprite.alertRange || sprite.state === 'chase') {
-        sprite.state = 'chase';
+      // Alerting: enemies wake when they SEE you (boss senses you anywhere)
+      if (sprite.state === 'idle') {
+        const sees = tileDist < sprite.alertRange
+          && (sprite.boss || this.hasLOS(sprite.x, sprite.y, this.player.x, this.player.y));
+        if (sees) {
+          sprite.state = 'chase';
+          this.sound.play('stinger');
+        } else {
+          continue;
+        }
+      }
 
-        // --- Attack with wind-up telegraph ---
-        const windupDur = sprite.boss ? 0.5 : 0.3;
-        if (sprite.windupTimer > 0) {
-          sprite.windupTimer -= dt;
-          // Lock in place while winding up
-          if (sprite.windupTimer <= 0) {
-            // Resolve attack: only land hit if still in range
+      // --- chase state ---
+      const windupDur = sprite.boss ? 0.5 : sprite.ranged ? 0.45 : 0.3;
+
+      if (sprite.windupTimer > 0) {
+        sprite.windupTimer -= dt;
+        if (sprite.windupTimer <= 0) {
+          if (sprite.pendingShot) {
+            sprite.pendingShot = false;
+            this.sound.play('enemyShoot');
+            this.enemyProjectiles.push({
+              x: sprite.x,
+              y: sprite.y,
+              angle: Math.atan2(this.player.y - sprite.y, this.player.x - sprite.x),
+              speed: 5.5 * TILE_SIZE,
+              damage: sprite.damage,
+              range: 12 * TILE_SIZE,
+              traveled: 0,
+            });
+            sprite.attackCooldown = 2.2;
+          } else {
             if (tileDist < sprite.attackRange + 0.3) {
               this.takeDamage(sprite.damage, Math.atan2(-dy, -dx));
               this.sound.play('enemyAttack');
             }
             sprite.attackCooldown = sprite.boss ? 1.0 : 1.5;
           }
-        } else if (tileDist < sprite.attackRange && sprite.attackCooldown <= 0) {
-          // Begin wind-up
-          sprite.windupTimer = windupDur;
-          sprite.windupMax = windupDur;
-        } else if (tileDist >= sprite.attackRange) {
-          // --- Movement with circle-vs-circle separation from other enemies ---
-          const angle = Math.atan2(dy, dx);
-          const moveSpeed = sprite.speed * TILE_SIZE * dt;
-
-          let mx = Math.cos(angle) * moveSpeed;
-          let my = Math.sin(angle) * moveSpeed;
-
-          // Sum separation force from nearby enemies
-          const sepRadius = TILE_SIZE * 0.85;
-          let sepX = 0, sepY = 0;
-          for (const other of this.sprites) {
-            if (other === sprite || !other.active || !other.health) continue;
-            if (!enemyTypes[other.type]) continue;
-            const odx = sprite.x - other.x;
-            const ody = sprite.y - other.y;
-            const od = Math.sqrt(odx * odx + ody * ody);
-            if (od > 0 && od < sepRadius) {
-              const push = (sepRadius - od) / sepRadius;
-              sepX += (odx / od) * push;
-              sepY += (ody / od) * push;
-            }
-          }
-          // Add separation contribution (scaled to feel like a gentle nudge)
-          mx += sepX * moveSpeed * 0.9;
-          my += sepY * moveSpeed * 0.9;
-
-          // Try combined move first; fall back to per-axis on wall hit
-          const newX = sprite.x + mx;
-          const newY = sprite.y + my;
-          if (!this.isWall(newX, newY)) {
-            sprite.x = newX;
-            sprite.y = newY;
-          } else {
-            if (!this.isWall(newX, sprite.y)) sprite.x = newX;
-            if (!this.isWall(sprite.x, newY)) sprite.y = newY;
-          }
         }
+        continue; // locked in place while winding up
+      }
+
+      const canShoot = sprite.ranged
+        && tileDist > 2.2 && tileDist < 7.5
+        && sprite.attackCooldown <= 0
+        && this.hasLOS(sprite.x, sprite.y, this.player.x, this.player.y);
+
+      if (canShoot) {
+        sprite.windupTimer = windupDur;
+        sprite.windupMax = windupDur;
+        sprite.pendingShot = true;
+        continue;
+      }
+
+      if (tileDist < sprite.attackRange && sprite.attackCooldown <= 0) {
+        sprite.windupTimer = windupDur;
+        sprite.windupMax = windupDur;
+        sprite.pendingShot = false;
+        continue;
+      }
+
+      // Ranged enemies keep their distance once in shooting range
+      const holdDistance = sprite.ranged ? 3.2 : sprite.attackRange;
+      if (tileDist <= holdDistance) continue;
+
+      // Movement with separation from other enemies
+      const angle = Math.atan2(dy, dx);
+      const moveSpeed = sprite.speed * TILE_SIZE * dt;
+
+      let mx = Math.cos(angle) * moveSpeed;
+      let my = Math.sin(angle) * moveSpeed;
+
+      const sepRadius = TILE_SIZE * 0.85;
+      let sepX = 0, sepY = 0;
+      for (const other of this.sprites) {
+        if (other === sprite || !other.active || !other.health) continue;
+        if (!enemyTypes[other.type]) continue;
+        const odx = sprite.x - other.x;
+        const ody = sprite.y - other.y;
+        const od = Math.sqrt(odx * odx + ody * ody);
+        if (od > 0 && od < sepRadius) {
+          const push = (sepRadius - od) / sepRadius;
+          sepX += (odx / od) * push;
+          sepY += (ody / od) * push;
+        }
+      }
+      mx += sepX * moveSpeed * 0.9;
+      my += sepY * moveSpeed * 0.9;
+
+      const newX = sprite.x + mx;
+      const newY = sprite.y + my;
+      if (!this.isWall(newX, newY)) {
+        sprite.x = newX;
+        sprite.y = newY;
+      } else {
+        if (!this.isWall(newX, sprite.y)) sprite.x = newX;
+        if (!this.isWall(sprite.x, newY)) sprite.y = newY;
       }
     }
   }
@@ -710,6 +881,14 @@ class Game {
             this.showMessage('UYIR +25', 1.5);
           }
           break;
+        case 'armor':
+          if (this.player.armor < 100) {
+            this.player.armor = Math.min(100, this.player.armor + 50);
+            sprite.active = false;
+            this.sound.play('pickup');
+            this.showMessage('KAVACHAM +50', 1.5);
+          }
+          break;
         case 'ammo':
           this.gameState.ammo.agni = Math.min(50, this.gameState.ammo.agni + 10);
           this.gameState.ammo.chakra = Math.min(100, this.gameState.ammo.chakra + 15);
@@ -718,7 +897,6 @@ class Game {
           this.sound.play('pickup');
           this.showMessage('AAYUDHAM KIDAITHHADHU', 1.5);
 
-          // Give weapons if not owned
           if (!this.gameState.weapons.includes('agni')) {
             this.gameState.weapons.push('agni');
             this.showMessage('AGNI KIDAITHHADHU!', 2);
@@ -738,102 +916,86 @@ class Game {
   }
 
   checkExit() {
-    if (!this.levelExit) return;
+    if (!this.levelExit || this._transitioning) return;
 
     const px = Math.floor(this.player.x / TILE_SIZE);
     const py = Math.floor(this.player.y / TILE_SIZE);
 
     if (px === this.levelExit.x && py === this.levelExit.y) {
-      // Check if all enemies are dead (optional, like doom you can skip)
       this.sound.play('levelComplete');
-      this.showMessage('NILAI MUDINTHADHU!', 3);
-      this.loadLevel(this.gameState.level); // level is 1-indexed, loadLevel is 0-indexed so this loads next
+      const nextIndex = this.gameState.level; // level is 1-indexed
+      const interlude = STORY.interludes[nextIndex - 1];
+      const isLast = nextIndex >= 3;
+
+      this._transitioning = true;
+      const proceed = () => {
+        this._transitioning = false;
+        if (isLast) {
+          this.gameState.victory = true;
+          this.sound.setHeartbeat(false);
+        } else {
+          this.loadLevel(nextIndex);
+        }
+      };
+
+      if (this.story) {
+        this.sound.duck(0.25, 0.3);
+        const part = isLast ? STORY.ending : interlude;
+        this.story.show(part, () => {
+          this.sound.duck(1, 0.8);
+          proceed();
+        });
+      } else {
+        proceed();
+      }
     }
   }
 
-  render() {
-    const ctx = this.engine.ctx;
-    const w = this.canvas.width;
-    const h = this.canvas.height;
+  render(dt) {
+    this.renderer.render(
+      this.player, this.map, this.sprites,
+      this.projectiles, this.enemyProjectiles,
+      this.gameState, dt,
+    );
 
-    // Main 3D view
-    this.engine.render(this.player, this.map, this.sprites, this.gameState);
+    const ctx = this.hud.ctx;
+    const w = this.hudCanvas.width;
+    const h = this.hudCanvas.height;
 
-    // Render projectiles as screen flashes (they're fast)
-    for (const proj of this.projectiles) {
-      const dx = proj.x - this.player.x;
-      const dy = proj.y - this.player.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const angle = Math.atan2(dy, dx) - this.player.angle;
-      let norm = angle;
-      while (norm > Math.PI) norm -= 2 * Math.PI;
-      while (norm < -Math.PI) norm += 2 * Math.PI;
+    this.hud.render(this.player, this.map, this.sprites, this.gameState, dt);
 
-      if (Math.abs(norm) < HALF_FOV && dist < TILE_SIZE * 15) {
-        const screenX = (0.5 + norm / FOV) * w;
-        const size = Math.max(4, 20 - dist / TILE_SIZE * 2);
-        const colors = {
-          chakra: '#ffdd00',
-          brahmastra: '#cc00ff',
-        };
-        ctx.fillStyle = colors[proj.type] || '#ff8800';
-        ctx.beginPath();
-        ctx.arc(screenX, h / 2, size, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Glow
-        ctx.globalAlpha = 0.3;
-        ctx.beginPath();
-        ctx.arc(screenX, h / 2, size * 2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      }
-    }
-
-    // Screen flash (damage/fire)
-    if (this.gameState.screenFlash > 0) {
+    // Screen flash (damage handled by vignette; weapon/explosion flashes here)
+    if (this.gameState.screenFlash > 0 && this.gameState.screenFlashColor !== 'red') {
       const colors = {
-        red: `rgba(255, 0, 0, ${this.gameState.screenFlash * 0.3})`,
         orange: `rgba(255, 120, 0, ${this.gameState.screenFlash * 0.2})`,
-        yellow: `rgba(255, 255, 0, ${this.gameState.screenFlash * 0.15})`,
+        yellow: `rgba(255, 255, 0, ${this.gameState.screenFlash * 0.12})`,
         purple: `rgba(180, 0, 255, ${this.gameState.screenFlash * 0.25})`,
         white: `rgba(255, 255, 255, ${this.gameState.screenFlash * 0.4})`,
       };
-      ctx.fillStyle = colors[this.gameState.screenFlashColor] || colors.red;
+      ctx.fillStyle = colors[this.gameState.screenFlashColor] || colors.yellow;
       ctx.fillRect(0, 0, w, h);
     }
 
-    // Message display
+    // Wind-up telegraphs above enemies about to strike
+    this.renderWindupIndicators(ctx, w, h);
+
     if (this.gameState.showMessage) {
       ctx.save();
       ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-      ctx.fillRect(w / 2 - 200, h / 2 - 60, 400, 40);
+      ctx.fillRect(w / 2 - 220, h / 2 - 80, 440, 40);
       ctx.strokeStyle = '#c8a000';
-      ctx.strokeRect(w / 2 - 200, h / 2 - 60, 400, 40);
+      ctx.strokeRect(w / 2 - 220, h / 2 - 80, 440, 40);
       ctx.fillStyle = '#ffcc00';
       ctx.font = 'bold 18px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(this.gameState.showMessage, w / 2, h / 2 - 35);
+      ctx.fillText(this.gameState.showMessage, w / 2, h / 2 - 55);
       ctx.textAlign = 'left';
       ctx.restore();
     }
 
-    // Crosshair
-    if (this.mouse.locked) {
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1.5;
-      const cx = w / 2, cy = h / 2 - 30;
-      ctx.beginPath();
-      ctx.moveTo(cx - 10, cy); ctx.lineTo(cx - 4, cy);
-      ctx.moveTo(cx + 4, cy); ctx.lineTo(cx + 10, cy);
-      ctx.moveTo(cx, cy - 10); ctx.lineTo(cx, cy - 4);
-      ctx.moveTo(cx, cy + 4); ctx.lineTo(cx, cy + 10);
-      ctx.stroke();
-    }
-
     // Boss health bar
-    const boss = this.sprites.find(s => s.boss && s.active);
-    if (boss) {
+    const boss = this.sprites.find((s) => s.boss && s.active);
+    if (boss && boss.state !== 'idle') {
       const bw = 300;
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
       ctx.fillRect(w / 2 - bw / 2 - 5, 15, bw + 10, 35);
@@ -850,7 +1012,6 @@ class Game {
       ctx.textAlign = 'left';
     }
 
-    // Pause screen
     if (this.gameState.paused) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
       ctx.fillRect(0, 0, w, h);
@@ -864,7 +1025,6 @@ class Game {
       ctx.textAlign = 'left';
     }
 
-    // Game Over screen
     if (this.gameState.gameOver) {
       ctx.fillStyle = 'rgba(80, 0, 0, 0.85)';
       ctx.fillRect(0, 0, w, h);
@@ -874,34 +1034,34 @@ class Game {
       ctx.fillText('MARANAM', w / 2, h / 2 - 40);
       ctx.fillStyle = '#cc0000';
       ctx.font = '24px monospace';
-      ctx.fillText('Nee veezhndhaal... Aadhma vizhippurai!', w / 2, h / 2 + 10);
+      ctx.fillText('Vidhi unnai vizhungiyadhu...', w / 2, h / 2 + 10);
       ctx.fillStyle = '#888';
       ctx.font = '18px monospace';
-      ctx.fillText('ENTER / ESC - Mendum Thodanga', w / 2, h / 2 + 50);
+      ctx.fillText('ENTER / ESC - Meendum Thodanga', w / 2, h / 2 + 50);
       ctx.textAlign = 'left';
     }
 
-    // Victory screen
     if (this.gameState.victory) {
-      ctx.fillStyle = 'rgba(0, 20, 60, 0.9)';
+      ctx.fillStyle = 'rgba(0, 10, 30, 0.9)';
       ctx.fillRect(0, 0, w, h);
       ctx.fillStyle = '#ffcc00';
       ctx.font = 'bold 56px monospace';
       ctx.textAlign = 'center';
       ctx.fillText('VETRI!', w / 2, h / 2 - 60);
       ctx.fillStyle = '#c8a000';
-      ctx.font = '28px monospace';
-      ctx.fillText('Dharmam Vென்றது!', w / 2, h / 2 - 10);
+      ctx.font = '24px monospace';
+      ctx.fillText('Vidhi ethirkollappattadhu.', w / 2, h / 2 - 15);
       ctx.fillStyle = '#aaa';
       ctx.font = '18px monospace';
-      ctx.fillText(`Kolai: ${this.gameState.kills}`, w / 2, h / 2 + 30);
+      ctx.fillText(`Kolai: ${this.gameState.kills}  |  Ragasiyam: ${this.gameState.secretsFound}/${this.gameState.totalSecrets}`, w / 2, h / 2 + 25);
       ctx.fillStyle = '#888';
-      ctx.fillText('ENTER / ESC - Mendum Thodanga', w / 2, h / 2 + 70);
+      ctx.fillText('ENTER / ESC - Meendum Thodanga', w / 2, h / 2 + 65);
       ctx.textAlign = 'left';
     }
 
-    // Pointer lock hint
-    if (!this.mouse.locked && !this.gameState.paused && !this.gameState.gameOver && !this.gameState.victory) {
+    // Pointer lock hint (desktop only)
+    if (!this.touch && !this.mouse.locked && !(this.story && this.story.active)
+        && !this.gameState.paused && !this.gameState.gameOver && !this.gameState.victory) {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
       ctx.fillRect(w / 2 - 180, h / 2 + 60, 360, 30);
       ctx.fillStyle = '#ffcc00';
@@ -909,6 +1069,40 @@ class Game {
       ctx.textAlign = 'center';
       ctx.fillText('Click to capture mouse | WASD to move', w / 2, h / 2 + 80);
       ctx.textAlign = 'left';
+    }
+  }
+
+  renderWindupIndicators(ctx, w, h) {
+    for (const sprite of this.sprites) {
+      if (!sprite.active || !sprite.health) continue;
+      if (!sprite.windupTimer || sprite.windupTimer <= 0) continue;
+
+      const dist = Math.hypot(sprite.x - this.player.x, sprite.y - this.player.y);
+      if (dist < 1) continue;
+      if (!this.hasLOS(this.player.x, this.player.y, sprite.x, sprite.y)) continue;
+
+      // Camera-accurate point above the enemy's head
+      const pt = this.renderer.projectSpriteTop(sprite, w, h);
+      if (!pt) continue;
+      const screenX = pt.x;
+      const cy = pt.y;
+
+      const projH = (TILE_SIZE * h) / dist * (sprite.boss ? 1.7 : 1);
+      const charge = 1 - sprite.windupTimer / (sprite.windupMax || 0.3);
+      const r = Math.max(4, projH * 0.06);
+
+      const glow = ctx.createRadialGradient(screenX, cy, 0, screenX, cy, r * 3);
+      glow.addColorStop(0, `rgba(255, 60, 30, ${0.7 * (0.5 + 0.5 * charge)})`);
+      glow.addColorStop(1, 'rgba(255, 60, 30, 0)');
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(screenX, cy, r * 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = `rgba(255, 200, 80, ${0.6 + 0.4 * charge})`;
+      ctx.beginPath();
+      ctx.arc(screenX, cy, r * (0.6 + 0.4 * charge), 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 }
