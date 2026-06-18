@@ -155,35 +155,43 @@ class Game {
     this.switchWeapon(owned[(i + 1) % owned.length]);
   }
 
-  interact() {
-    // Look for a door in the facing direction (close or one tile out)
-    for (const reach of [0.8, 1.5]) {
+  // Door (or secret wall) the player is facing within reach, else null.
+  doorInFront(maxReach = 1.7) {
+    for (const reach of [0.55, 0.9, 1.3, maxReach]) {
       const checkX = this.player.x + Math.cos(this.player.angle) * reach * TILE_SIZE;
       const checkY = this.player.y + Math.sin(this.player.angle) * reach * TILE_SIZE;
       const mapX = Math.floor(checkX / TILE_SIZE);
       const mapY = Math.floor(checkY / TILE_SIZE);
       const door = this.doors.find((d) => d.x === mapX && d.y === mapY && !d.opening);
-      if (!door) continue;
+      if (door) return door;
+    }
+    return null;
+  }
 
-      const needed = KEY_FOR_DOOR[door.tile];
-      if (needed && !this.gameState.keys[needed]) {
-        this.sound.play('locked');
-        const keyNames = { red: 'SEVI', blue: 'NEELA', gold: 'THANGA' };
-        this.showMessage(`POOTTAPPATTADHU - ${keyNames[needed]} SAAVI THEVAI!`, 2.5);
-        return;
-      }
-
-      door.opening = true;
-      if (door.tile === T_SECRET) {
-        this.gameState.secretsFound++;
-        this.sound.play('secret');
-        this.showMessage('RAGASIYAM KANDUPIDIKKAPPATTADHU!', 2.5);
-      } else {
-        this.sound.play('door');
-        this.showMessage('KATHAVU THIRANDHADHU', 2);
-      }
+  openDoor(door) {
+    if (door.opening) return;
+    const needed = KEY_FOR_DOOR[door.tile];
+    if (needed && !this.gameState.keys[needed]) {
+      this.sound.play('locked');
+      const keyNames = { red: 'SEVI', blue: 'NEELA', gold: 'THANGA' };
+      this.showMessage(`POOTTAPPATTADHU - ${keyNames[needed]} SAAVI THEVAI!`, 2.5);
       return;
     }
+
+    door.opening = true;
+    if (door.tile === T_SECRET) {
+      this.gameState.secretsFound++;
+      this.sound.play('secret');
+      this.showMessage('RAGASIYAM KANDUPIDIKKAPPATTADHU!', 2.5);
+    } else {
+      this.sound.play('door');
+      this.showMessage('KATHAVU THIRANDHADHU', 2);
+    }
+  }
+
+  interact() {
+    const door = this.doorInFront();
+    if (door) this.openDoor(door);
   }
 
   showMessage(text, duration) {
@@ -346,6 +354,26 @@ class Game {
         this.map.setTile(door.x, door.y, 0);
       }
       this.renderer.setDoorOpenT(door.x, door.y, door.openT);
+    }
+
+    // Plain wooden doors swing open as you walk up; locked & secret need E.
+    for (const door of this.doors) {
+      if (door.opening || door.tile === T_SECRET || KEY_FOR_DOOR[door.tile]) continue;
+      const ddx = (door.x + 0.5) * TILE_SIZE - this.player.x;
+      const ddy = (door.y + 0.5) * TILE_SIZE - this.player.y;
+      if (ddx * ddx + ddy * ddy < (1.5 * TILE_SIZE) ** 2) this.openDoor(door);
+    }
+
+    // Hint for the door / locked gate the player is looking at.
+    const front = this.doorInFront();
+    if (front && front.tile !== T_SECRET) {
+      const needed = KEY_FOR_DOOR[front.tile];
+      const keyNames = { red: 'SEVI', blue: 'NEELA', gold: 'THANGA' };
+      this.gameState.doorPrompt = (needed && !this.gameState.keys[needed])
+        ? { text: `${keyNames[needed]} SAAVI THEVAI`, locked: true }
+        : { text: 'THIRA  [E]', locked: false };
+    } else {
+      this.gameState.doorPrompt = null;
     }
 
     // Shooting

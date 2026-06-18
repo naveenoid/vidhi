@@ -27,8 +27,29 @@ export class Hud {
     this.renderWeapon(ctx, player, gameState, w, h);
     this.renderVignette(ctx, gameState, w, h);
     this.renderCrosshair(ctx, gameState, w, h, dt);
+    this.renderDoorPrompt(ctx, gameState, w, h);
     this.renderHUD(ctx, player, gameState, w, h);
     this.renderMinimap(ctx, player, map, sprites, gameState, w, h);
+  }
+
+  // Prompt shown when facing a door: how to open it, or which key it wants.
+  renderDoorPrompt(ctx, gameState, w, h) {
+    const p = gameState.doorPrompt;
+    if (!p) return;
+    const y = Math.round(h * 0.6);
+    ctx.save();
+    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'center';
+    const tw = ctx.measureText(p.text).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(w / 2 - tw / 2 - 16, y - 21, tw + 32, 32);
+    ctx.strokeStyle = p.locked ? '#aa2222' : '#c8a000';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(w / 2 - tw / 2 - 16, y - 21, tw + 32, 32);
+    ctx.fillStyle = p.locked ? '#ff5a48' : '#ffd24a';
+    ctx.fillText(p.text, w / 2, y);
+    ctx.restore();
+    ctx.textAlign = 'left';
   }
 
   // Permanent horror vignette + directional damage indicator
@@ -77,39 +98,175 @@ export class Hud {
 
   renderWeapon(ctx, player, gameState, w, h) {
     const weapon = gameState.currentWeapon;
-    const bobX = Math.sin(gameState.walkCycle * 2) * 8;
+    // The weapon art is authored ~120px wide, bottom-anchored at (w/2, h).
+    // Scale it up so it fills a chunky slice of the screen like a real
+    // first-person viewmodel instead of a tiny floating prop.
+    const s = Math.max(2.1, Math.min(3.4, h / 300));
+    const bobX = Math.sin(gameState.walkCycle * 2) * 6;
     const bobY = Math.abs(Math.cos(gameState.walkCycle * 2)) * 5;
-    const fireOffset = gameState.fireAnim > 0 ? -20 * gameState.fireAnim : 0;
+    const sway = Math.sin(gameState.time * 1.1) * 4; // idle drift
+    const fireOffset = gameState.fireAnim > 0 ? -22 * gameState.fireAnim : 0;
 
-    const weaponX = w / 2 - 60 + bobX;
+    const weaponX = w / 2 - 60 + bobX + sway;
     const weaponY = h - 180 + bobY + fireOffset;
 
+    const rightShift = w * 0.05;
+    const downShift = h * 0.06;
     ctx.save();
+    // Grow the viewmodel from a bottom anchor nudged right/down so the staff
+    // sits to the side of the crosshair instead of over it.
+    ctx.translate(w / 2 + rightShift, h + downShift);
+    ctx.scale(s, s);
+    ctx.translate(-w / 2, -h);
+
+    // Contact shadow at the screen edge grounds the hand.
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath();
+    ctx.ellipse(w / 2 + sway * 0.4, h - 4, 78, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    this.drawArm(ctx, weaponX, weaponY);
     switch (weapon) {
       case 'trishul': this.drawTrishul(ctx, weaponX, weaponY, gameState); break;
       case 'agni': this.drawAgni(ctx, weaponX, weaponY, gameState); break;
       case 'chakra': this.drawChakra(ctx, weaponX, weaponY, gameState); break;
       case 'brahmastra': this.drawBrahmastra(ctx, weaponX, weaponY, gameState); break;
     }
+    this.drawGripFingers(ctx, weaponX, weaponY);
     ctx.restore();
 
-    // Muzzle flash
+    // Settle the bright vector art into the dim, lantern-lit scene. source-atop
+    // tints only the pixels just drawn (the weapon + hand), not the empty HUD.
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-atop';
+    const shade = ctx.createLinearGradient(0, h * 0.4, 0, h);
+    shade.addColorStop(0, 'rgba(6,5,12,0)');
+    shade.addColorStop(1, 'rgba(2,2,8,0.5)');
+    ctx.fillStyle = shade;
+    ctx.fillRect(0, 0, w, h);
+    const warm = ctx.createRadialGradient(w / 2, h * 0.58, 0, w / 2, h * 0.58, h * 0.5);
+    warm.addColorStop(0, 'rgba(255,150,70,0.16)');
+    warm.addColorStop(1, 'rgba(255,150,70,0)');
+    ctx.fillStyle = warm;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+
+    // Muzzle flash (bright, on top of the shading)
     if (gameState.fireAnim > 0.5) {
+      const fx = w / 2 + rightShift + bobX * s;
+      const fy = h + downShift + (weaponY - 12 - h) * s;
+      const rad = 60 * gameState.fireAnim * (s / 2);
       ctx.save();
       ctx.globalAlpha = gameState.fireAnim - 0.5;
       const flashColors = {
         trishul: '#88ccff', agni: '#ff6600', chakra: '#ffdd00', brahmastra: '#ff00ff',
       };
-      const g = ctx.createRadialGradient(w / 2, h - 200 + fireOffset, 0, w / 2, h - 200 + fireOffset, 46 * gameState.fireAnim);
+      const g = ctx.createRadialGradient(fx, fy, 0, fx, fy, rad);
       g.addColorStop(0, '#ffffff');
       g.addColorStop(0.4, flashColors[weapon] || '#ffaa00');
       g.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(w / 2, h - 200 + fireOffset, 46 * gameState.fireAnim, 0, Math.PI * 2);
+      ctx.arc(fx, fy, rad, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
+  }
+
+  // First-person forearm + fist gripping the weapon. Drawn in the same authored
+  // coordinate space as the weapons (x,y is the weapon's top-left origin), so it
+  // scales with the viewmodel. drawGripFingers() is called after the weapon so
+  // the thumb and fingertips wrap in front of the shaft.
+  drawArm(ctx, x, y) {
+    const cx = x + 52;          // grip centre
+    const baseY = y + 215;      // off the bottom of the screen
+    const wristY = y + 120;
+
+    // Forearm
+    const fore = ctx.createLinearGradient(0, wristY, 0, baseY);
+    fore.addColorStop(0, '#7a5a40');
+    fore.addColorStop(0.5, '#5b4330');
+    fore.addColorStop(1, '#36271b');
+    ctx.fillStyle = fore;
+    ctx.beginPath();
+    ctx.moveTo(x - 10, baseY);
+    ctx.lineTo(x + 122, baseY);
+    ctx.lineTo(x + 92, wristY + 6);
+    ctx.quadraticCurveTo(cx, wristY - 10, x + 24, wristY + 10);
+    ctx.closePath();
+    ctx.fill();
+
+    // Shadow down the inner edge, highlight along the muscle
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.moveTo(x - 10, baseY);
+    ctx.lineTo(x + 22, baseY);
+    ctx.lineTo(x + 32, wristY + 12);
+    ctx.lineTo(x + 24, wristY + 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(196,156,116,0.35)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(x + 74, baseY);
+    ctx.lineTo(x + 80, wristY + 16);
+    ctx.stroke();
+
+    // Blood-dark temple cloth bracer with gold trim
+    const wrapY = y + 152;
+    for (let i = 0; i < 4; i++) {
+      const yy = wrapY + i * 11;
+      ctx.fillStyle = i % 2 ? '#491010' : '#5f1818';
+      ctx.beginPath();
+      ctx.moveTo(x + 4, yy);
+      ctx.lineTo(x + 114, yy - 4);
+      ctx.lineTo(x + 114, yy + 8);
+      ctx.lineTo(x + 4, yy + 12);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = '#b8902c';
+    ctx.fillRect(x + 4, wrapY - 5, 110, 3);
+    ctx.fillRect(x + 4, wrapY + 44, 104, 3);
+
+    // Fist
+    const hg = ctx.createRadialGradient(cx - 5, y + 95, 4, cx, y + 103, 27);
+    hg.addColorStop(0, '#8c6a4b');
+    hg.addColorStop(1, '#4a3624');
+    ctx.fillStyle = hg;
+    ctx.beginPath();
+    ctx.ellipse(cx, y + 103, 25, 21, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#6b4f37';
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.ellipse(cx - 17 + i * 11, y + 92, 5, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.beginPath();
+    ctx.ellipse(cx, y + 120, 22, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  drawGripFingers(ctx, x, y) {
+    const cx = x + 52;
+    // Thumb crossing in front of the shaft
+    ctx.fillStyle = '#82613f';
+    ctx.beginPath();
+    ctx.ellipse(cx - 12, y + 106, 8, 14, -0.5, 0, Math.PI * 2);
+    ctx.fill();
+    // Fingertips peeking over the grip
+    ctx.fillStyle = '#6f5238';
+    for (let i = 0; i < 2; i++) {
+      ctx.beginPath();
+      ctx.ellipse(cx + 8 + i * 9, y + 96 + i * 5, 6, 9, 0.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.beginPath();
+    ctx.ellipse(cx - 12, y + 100, 4, 5, -0.5, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   drawTrishul(ctx, x, y, gs) {
