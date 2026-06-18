@@ -15,6 +15,10 @@ const MAX_PARTICLES = 512;
 
 const ENEMY_TYPES = new Set(['asura', 'naga', 'rakshasa']);
 
+// Faint self-lit tint so doors read as interactive against plain stone.
+// Keyed by tile id: 5 wood, 6 red key, 7 blue key, 8 gold key.
+const DOOR_GLOW = { 5: 0x3a2008, 6: 0x550010, 7: 0x001a48, 8: 0x3c2c00 };
+
 function cellHash(x, y) {
   const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
   return n - Math.floor(n);
@@ -213,7 +217,11 @@ export class Renderer3D {
         const geo = flankedEW
           ? new THREE.BoxGeometry(1, WALL_HEIGHT, 0.14)
           : new THREE.BoxGeometry(0.14, WALL_HEIGHT, 1);
-        mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ map: this.textures[tile] }));
+        mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+          map: this.textures[tile],
+          emissive: new THREE.Color(DOOR_GLOW[tile] || 0x2a1606),
+          emissiveIntensity: 0.75,
+        }));
       }
       mesh.position.set(x + 0.5, WALL_HEIGHT / 2, y + 0.5);
       this.levelGroup.add(mesh);
