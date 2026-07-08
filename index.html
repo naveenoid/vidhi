@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>VIDHI - Tamil Horror Doom</title>
   <script type="importmap">
     { "imports": { "three": "./lib/three.module.min.js" } }
@@ -234,11 +234,12 @@
 
     .touch-btn:active { background: rgba(200, 160, 0, 0.25); }
 
+    /* Buttons sit above the 48px status bar (plus home-indicator inset) */
     #btn-fire {
-      right: 26px;
-      bottom: 30px;
-      width: 92px;
-      height: 92px;
+      right: calc(20px + env(safe-area-inset-right, 0px));
+      bottom: calc(78px + env(safe-area-inset-bottom, 0px));
+      width: 96px;
+      height: 96px;
       font-size: 17px;
       border-color: rgba(255, 60, 30, 0.55);
       color: #ff5533;
@@ -246,34 +247,35 @@
     }
 
     #btn-weapon {
-      right: 140px;
-      bottom: 44px;
-      width: 60px;
-      height: 60px;
+      right: calc(132px + env(safe-area-inset-right, 0px));
+      bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+      width: 58px;
+      height: 58px;
       font-size: 13px;
     }
 
     #btn-interact {
-      right: 52px;
-      bottom: 142px;
-      width: 64px;
-      height: 64px;
+      right: calc(44px + env(safe-area-inset-right, 0px));
+      bottom: calc(192px + env(safe-area-inset-bottom, 0px));
+      width: 68px;
+      height: 68px;
       font-size: 15px;
-      border-color: rgba(80, 200, 120, 0.5);
+      border-color: rgba(80, 200, 120, 0.6);
       color: #55cc88;
+      background: rgba(0, 30, 12, 0.45);
     }
 
     #btn-map {
-      left: 18px;
-      top: 18px;
+      left: calc(14px + env(safe-area-inset-left, 0px));
+      top: calc(14px + env(safe-area-inset-top, 0px));
       width: 52px;
       height: 52px;
       font-size: 12px;
     }
 
     #btn-pause {
-      right: 18px;
-      top: 18px;
+      right: calc(14px + env(safe-area-inset-right, 0px));
+      top: calc(14px + env(safe-area-inset-top, 0px));
       width: 52px;
       height: 52px;
       font-size: 16px;
@@ -363,6 +365,7 @@
 
       const story = new StoryScreen();
       game = new Game(glCanvas, hudCanvas, story);
+      window.__vidhi = game; // console/debug handle
       resize();
 
       if (isTouchDevice()) {

@@ -4,7 +4,8 @@
 
 import * as THREE from 'three';
 
-const TEX_SIZE = 256;
+const TEX_SIZE = 512;
+const K = TEX_SIZE / 256; // scale for details authored in 256px space
 
 // Deterministic pseudo-random, so textures look the same every run
 function makeRng(seed) {
@@ -27,14 +28,14 @@ function toTexture(canvas) {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
-  tex.anisotropy = 4;
+  tex.anisotropy = 8;
   return tex;
 }
 
 // Scatter cracks: dark jagged random-walk lines
 function paintCracks(ctx, rng, count, color) {
   ctx.strokeStyle = color;
-  ctx.lineWidth = 1;
+  ctx.lineWidth = K;
   for (let i = 0; i < count; i++) {
     let x = rng() * TEX_SIZE;
     let y = rng() * TEX_SIZE * 0.5;
@@ -42,8 +43,8 @@ function paintCracks(ctx, rng, count, color) {
     ctx.moveTo(x, y);
     const segs = 4 + Math.floor(rng() * 6);
     for (let s = 0; s < segs; s++) {
-      x += (rng() - 0.5) * 30;
-      y += rng() * 25;
+      x += (rng() - 0.5) * 30 * K;
+      y += rng() * 25 * K;
       ctx.lineTo(x, y);
     }
     ctx.stroke();
@@ -55,7 +56,7 @@ function paintGrime(ctx, rng, count, rgba) {
   for (let i = 0; i < count; i++) {
     const x = rng() * TEX_SIZE;
     const y = rng() * TEX_SIZE;
-    const r = 15 + rng() * 50;
+    const r = (15 + rng() * 50) * K;
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
     g.addColorStop(0, rgba);
     g.addColorStop(1, 'rgba(0,0,0,0)');
@@ -84,14 +85,14 @@ function paintBlocks(ctx, rng, base, mortar, rows, jitter) {
   const rowH = TEX_SIZE / rows;
   ctx.fillStyle = mortar;
   for (let r = 0; r <= rows; r++) {
-    ctx.fillRect(0, r * rowH - 1, TEX_SIZE, 3);
+    ctx.fillRect(0, r * rowH - K, TEX_SIZE, 3 * K);
   }
   for (let r = 0; r < rows; r++) {
     const cols = 2 + Math.floor(rng() * 2);
     const offset = rng() * TEX_SIZE;
     for (let c = 0; c < cols; c++) {
       const x = (offset + (c * TEX_SIZE) / cols + (rng() - 0.5) * jitter) % TEX_SIZE;
-      ctx.fillRect(x, r * rowH, 3, rowH);
+      ctx.fillRect(x, r * rowH, 3 * K, rowH);
     }
   }
   // Per-block shading variation
@@ -189,13 +190,14 @@ function doorTexture(emblemColor) {
   for (let p = 0; p < planks; p++) {
     const x = (p * TEX_SIZE) / planks;
     ctx.fillStyle = p % 2 ? '#42291a' : '#372112';
-    ctx.fillRect(x, 0, TEX_SIZE / planks - 2, TEX_SIZE);
+    ctx.fillRect(x, 0, TEX_SIZE / planks - 2 * K, TEX_SIZE);
     ctx.fillStyle = '#241307';
-    ctx.fillRect(x + TEX_SIZE / planks - 2, 0, 2, TEX_SIZE);
+    ctx.fillRect(x + TEX_SIZE / planks - 2 * K, 0, 2 * K, TEX_SIZE);
     // Wood grain
     ctx.strokeStyle = 'rgba(20,10,4,0.5)';
+    ctx.lineWidth = K;
     for (let g = 0; g < 4; g++) {
-      const gx = x + 4 + rng() * (TEX_SIZE / planks - 8);
+      const gx = x + 4 * K + rng() * (TEX_SIZE / planks - 8 * K);
       ctx.beginPath();
       ctx.moveTo(gx, 0);
       ctx.bezierCurveTo(gx + 6, TEX_SIZE * 0.33, gx - 6, TEX_SIZE * 0.66, gx, TEX_SIZE);
@@ -205,32 +207,32 @@ function doorTexture(emblemColor) {
   // Iron bands
   for (const y of [TEX_SIZE * 0.15, TEX_SIZE * 0.8]) {
     ctx.fillStyle = '#26282c';
-    ctx.fillRect(0, y, TEX_SIZE, 18);
+    ctx.fillRect(0, y, TEX_SIZE, 18 * K);
     ctx.fillStyle = '#3a3d44';
-    ctx.fillRect(0, y + 2, TEX_SIZE, 3);
+    ctx.fillRect(0, y + 2 * K, TEX_SIZE, 3 * K);
     for (let b = 0; b < 6; b++) {
       ctx.fillStyle = '#15161a';
       ctx.beginPath();
-      ctx.arc(20 + b * 44, y + 9, 4, 0, Math.PI * 2);
+      ctx.arc((20 + b * 44) * K, y + 9 * K, 4 * K, 0, Math.PI * 2);
       ctx.fill();
     }
   }
   if (emblemColor) {
     // Glowing key emblem in the center
     const cx = TEX_SIZE / 2, cy = TEX_SIZE / 2;
-    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 50);
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, 50 * K);
     g.addColorStop(0, emblemColor);
     g.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = g;
-    ctx.fillRect(cx - 50, cy - 50, 100, 100);
+    ctx.fillRect(cx - 50 * K, cy - 50 * K, 100 * K, 100 * K);
     ctx.strokeStyle = emblemColor;
-    ctx.lineWidth = 4;
+    ctx.lineWidth = 4 * K;
     ctx.beginPath();
-    ctx.arc(cx, cy - 8, 14, 0, Math.PI * 2);
-    ctx.moveTo(cx, cy + 6);
-    ctx.lineTo(cx, cy + 30);
-    ctx.moveTo(cx, cy + 22);
-    ctx.lineTo(cx + 10, cy + 22);
+    ctx.arc(cx, cy - 8 * K, 14 * K, 0, Math.PI * 2);
+    ctx.moveTo(cx, cy + 6 * K);
+    ctx.lineTo(cx, cy + 30 * K);
+    ctx.moveTo(cx, cy + 22 * K);
+    ctx.lineTo(cx + 10 * K, cy + 22 * K);
     ctx.stroke();
   }
   paintGrime(ctx, rng, 4, 'rgba(0,0,0,0.3)');
@@ -248,7 +250,7 @@ function floorTexture() {
   const cell = TEX_SIZE / n;
   for (let y = 0; y < n; y++) {
     for (let x = 0; x < n; x++) {
-      const inset = 2 + rng() * 3;
+      const inset = (2 + rng() * 3) * K;
       const v = 0.85 + rng() * 0.3;
       ctx.fillStyle = `rgb(${Math.floor(58 * v)},${Math.floor(52 * v)},${Math.floor(44 * v)})`;
       ctx.fillRect(x * cell + inset, y * cell + inset, cell - inset * 2, cell - inset * 2);
