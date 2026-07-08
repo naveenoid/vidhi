@@ -138,8 +138,14 @@ class Game {
 
   onResize(w, h) {
     this.renderer.onResize(w, h);
-    this.hudCanvas.width = w;
-    this.hudCanvas.height = h;
+    // HUD canvas gets a DPR-scaled backing store for crisp text on phones;
+    // all HUD drawing happens in CSS px via the transform set each frame.
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.hudCanvas.width = Math.round(w * dpr);
+    this.hudCanvas.height = Math.round(h * dpr);
+    this.hud.dpr = dpr;
+    this.viewW = w;
+    this.viewH = h;
   }
 
   switchWeapon(weapon) {
@@ -156,8 +162,8 @@ class Game {
   }
 
   // Door (or secret wall) the player is facing within reach, else null.
-  doorInFront(maxReach = 1.7) {
-    for (const reach of [0.55, 0.9, 1.3, maxReach]) {
+  doorInFront(maxReach = 2.2) {
+    for (const reach of [0.55, 0.9, 1.3, 1.7, maxReach]) {
       const checkX = this.player.x + Math.cos(this.player.angle) * reach * TILE_SIZE;
       const checkY = this.player.y + Math.sin(this.player.angle) * reach * TILE_SIZE;
       const mapX = Math.floor(checkX / TILE_SIZE);
@@ -356,12 +362,15 @@ class Game {
       this.renderer.setDoorOpenT(door.x, door.y, door.openT);
     }
 
-    // Plain wooden doors swing open as you walk up; locked & secret need E.
+    // Doors swing open as you walk up — including locked ones once you carry
+    // the right key. Only secret walls still need a deliberate E press.
     for (const door of this.doors) {
-      if (door.opening || door.tile === T_SECRET || KEY_FOR_DOOR[door.tile]) continue;
+      if (door.opening || door.tile === T_SECRET) continue;
+      const needed = KEY_FOR_DOOR[door.tile];
+      if (needed && !this.gameState.keys[needed]) continue;
       const ddx = (door.x + 0.5) * TILE_SIZE - this.player.x;
       const ddy = (door.y + 0.5) * TILE_SIZE - this.player.y;
-      if (ddx * ddx + ddy * ddy < (1.5 * TILE_SIZE) ** 2) this.openDoor(door);
+      if (ddx * ddx + ddy * ddy < (1.6 * TILE_SIZE) ** 2) this.openDoor(door);
     }
 
     // Hint for the door / locked gate the player is looking at.
@@ -370,8 +379,8 @@ class Game {
       const needed = KEY_FOR_DOOR[front.tile];
       const keyNames = { red: 'SEVI', blue: 'NEELA', gold: 'THANGA' };
       this.gameState.doorPrompt = (needed && !this.gameState.keys[needed])
-        ? { text: `${keyNames[needed]} SAAVI THEVAI`, locked: true }
-        : { text: 'THIRA  [E]', locked: false };
+        ? { text: `${keyNames[needed]} SAAVI THEVAI / KEY NEEDED`, locked: true }
+        : { text: 'KATHAVU · WALK IN', locked: false };
     } else {
       this.gameState.doorPrompt = null;
     }
@@ -987,8 +996,8 @@ class Game {
     );
 
     const ctx = this.hud.ctx;
-    const w = this.hudCanvas.width;
-    const h = this.hudCanvas.height;
+    const w = this.viewW || this.hudCanvas.width;
+    const h = this.viewH || this.hudCanvas.height;
 
     this.hud.render(this.player, this.map, this.sprites, this.gameState, dt);
 
@@ -1009,14 +1018,22 @@ class Game {
 
     if (this.gameState.showMessage) {
       ctx.save();
+      let size = w < 480 ? 14 : 18;
+      ctx.font = `bold ${size}px monospace`;
+      let tw = ctx.measureText(this.gameState.showMessage).width;
+      if (tw > w - 40) { // shrink to fit narrow phones
+        size = Math.max(10, Math.floor(size * (w - 40) / tw));
+        ctx.font = `bold ${size}px monospace`;
+        tw = ctx.measureText(this.gameState.showMessage).width;
+      }
+      const bw = tw + 36;
       ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
-      ctx.fillRect(w / 2 - 220, h / 2 - 80, 440, 40);
+      ctx.fillRect(w / 2 - bw / 2, h / 2 - 80, bw, 40);
       ctx.strokeStyle = '#c8a000';
-      ctx.strokeRect(w / 2 - 220, h / 2 - 80, 440, 40);
+      ctx.strokeRect(w / 2 - bw / 2, h / 2 - 80, bw, 40);
       ctx.fillStyle = '#ffcc00';
-      ctx.font = 'bold 18px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(this.gameState.showMessage, w / 2, h / 2 - 55);
+      ctx.fillText(this.gameState.showMessage, w / 2, h / 2 - 54);
       ctx.textAlign = 'left';
       ctx.restore();
     }
@@ -1024,7 +1041,7 @@ class Game {
     // Boss health bar
     const boss = this.sprites.find((s) => s.boss && s.active);
     if (boss && boss.state !== 'idle') {
-      const bw = 300;
+      const bw = Math.min(300, Math.floor(w * 0.72));
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
       ctx.fillRect(w / 2 - bw / 2 - 5, 15, bw + 10, 35);
       ctx.fillStyle = '#330000';

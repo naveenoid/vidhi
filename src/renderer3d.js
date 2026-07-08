@@ -30,6 +30,10 @@ export class Renderer3D {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     const coarse = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, coarse ? 1.5 : 2));
+    // Filmic tone mapping: keeps torch highlights warm without clipping and
+    // lifts the crushed shadows that made the flat-lit look read as "poor".
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.35;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(68, canvas.clientWidth / canvas.clientHeight, 0.05, 60);
@@ -41,6 +45,9 @@ export class Renderer3D {
     // Persistent lights
     this.ambient = new THREE.AmbientLight(0x9090b0, 0.22);
     this.scene.add(this.ambient);
+    // Gentle top-down fill so mid-distance geometry keeps its shape in the dark
+    this.hemi = new THREE.HemisphereLight(0x3a3020, 0x0c0805, 0.5);
+    this.scene.add(this.hemi);
     this.lantern = new THREE.PointLight(0xffc080, 14, 10, 2);
     this.scene.add(this.lantern);
     this.muzzleLight = new THREE.PointLight(0xffaa40, 0, 8, 2);
@@ -203,6 +210,13 @@ export class Renderer3D {
   }
 
   _buildDoors(map, doors) {
+    this.doorPulse = [];
+    const frameMat = new THREE.MeshLambertMaterial({
+      map: this.textures[4], // carved gold blockwork
+      color: 0xd8b060,
+      emissive: new THREE.Color(0x2a1d05),
+      emissiveIntensity: 0.8,
+    });
     for (const door of doors) {
       const { x, y, tile } = door;
       let mesh;
@@ -217,11 +231,33 @@ export class Renderer3D {
         const geo = flankedEW
           ? new THREE.BoxGeometry(1, WALL_HEIGHT, 0.14)
           : new THREE.BoxGeometry(0.14, WALL_HEIGHT, 1);
-        mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+        const mat = new THREE.MeshLambertMaterial({
           map: this.textures[tile],
-          emissive: new THREE.Color(DOOR_GLOW[tile] || 0x2a1606),
+          emissive: new THREE.Color(DOOR_GLOW[tile] || 0x3a2008),
           emissiveIntensity: 0.75,
-        }));
+        });
+        mesh = new THREE.Mesh(geo, mat);
+        this.doorPulse.push({ mat, phase: (x * 7 + y * 13) % 6 });
+
+        // Carved gold frame: posts + lintel make doorways read from afar
+        const postGeo = flankedEW
+          ? new THREE.BoxGeometry(0.18, WALL_HEIGHT, 0.34)
+          : new THREE.BoxGeometry(0.34, WALL_HEIGHT, 0.18);
+        for (const side of [-0.41, 0.41]) {
+          const post = new THREE.Mesh(postGeo, frameMat);
+          post.position.set(
+            x + 0.5 + (flankedEW ? side : 0),
+            WALL_HEIGHT / 2,
+            y + 0.5 + (flankedEW ? 0 : side),
+          );
+          this.levelGroup.add(post);
+        }
+        const lintelGeo = flankedEW
+          ? new THREE.BoxGeometry(1, 0.16, 0.34)
+          : new THREE.BoxGeometry(0.34, 0.16, 1);
+        const lintel = new THREE.Mesh(lintelGeo, frameMat);
+        lintel.position.set(x + 0.5, WALL_HEIGHT - 0.08, y + 0.5);
+        this.levelGroup.add(lintel);
       }
       mesh.position.set(x + 0.5, WALL_HEIGHT / 2, y + 0.5);
       this.levelGroup.add(mesh);
@@ -590,6 +626,13 @@ export class Renderer3D {
 
     // Doors animate via openT set by game logic
     for (const [, entry] of this.doorMeshes) entry.mesh.updateMatrix?.();
+
+    // Doors softly pulse so they read as interactive
+    if (this.doorPulse) {
+      for (const d of this.doorPulse) {
+        d.mat.emissiveIntensity = 0.65 + 0.35 * Math.sin(time * 2.6 + d.phase);
+      }
+    }
 
     this._updateTorches(time, dt, camX, camZ);
     this._updateSprites(sprites, gameState, camX, camZ);

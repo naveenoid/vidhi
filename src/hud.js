@@ -2,16 +2,19 @@
 // Drawn on a transparent canvas stacked above the WebGL view: weapon
 // sprite, status bar, minimap, crosshair, vignette and damage feedback.
 
-import { TILE_SIZE } from './constants.js';
+import { TILE_SIZE, DOOR_TILES, isTouchDevice } from './constants.js';
 
-const MINIMAP_SCALE = 0.18;
-const MINIMAP_SCALE_EXPANDED = 0.55;
+// Minimap wall colors, indexed by tile code
+const MAP_COLORS = ['', '#8B7355', '#AA4444', '#555566', '#C8A000',
+  '#e8b84a', '#e0405a', '#4a7ce0', '#ffd24a', '#8B7355'];
 
 export class Hud {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.hitMarkerT = 0;
+    this.dpr = 1; // set by Game.onResize; ctx transform applied per frame
+    this.touch = isTouchDevice();
   }
 
   showHitMarker() {
@@ -20,8 +23,10 @@ export class Hud {
 
   render(player, map, sprites, gameState, dt) {
     const ctx = this.ctx;
-    const w = this.canvas.width;
-    const h = this.canvas.height;
+    // Canvas backing store is DPR-scaled for crisp text; draw in CSS px.
+    const w = this.canvas.width / this.dpr;
+    const h = this.canvas.height / this.dpr;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
     this.renderWeapon(ctx, player, gameState, w, h);
@@ -36,14 +41,21 @@ export class Hud {
   renderDoorPrompt(ctx, gameState, w, h) {
     const p = gameState.doorPrompt;
     if (!p) return;
-    const y = Math.round(h * 0.6);
+    const y = Math.round(h * 0.62);
+    const pulse = 0.75 + 0.25 * Math.sin((gameState.time || 0) * 4);
     ctx.save();
-    ctx.font = 'bold 18px monospace';
+    let size = w < 480 ? 15 : 18;
+    ctx.font = `bold ${size}px monospace`;
+    let tw = ctx.measureText(p.text).width;
+    if (tw > w - 48) { // shrink to fit narrow phones
+      size = Math.max(11, Math.floor(size * (w - 48) / tw));
+      ctx.font = `bold ${size}px monospace`;
+      tw = ctx.measureText(p.text).width;
+    }
     ctx.textAlign = 'center';
-    const tw = ctx.measureText(p.text).width;
-    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
     ctx.fillRect(w / 2 - tw / 2 - 16, y - 21, tw + 32, 32);
-    ctx.strokeStyle = p.locked ? '#aa2222' : '#c8a000';
+    ctx.strokeStyle = p.locked ? '#aa2222' : `rgba(200,160,0,${pulse})`;
     ctx.lineWidth = 1.5;
     ctx.strokeRect(w / 2 - tw / 2 - 16, y - 21, tw + 32, 32);
     ctx.fillStyle = p.locked ? '#ff5a48' : '#ffd24a';
@@ -99,9 +111,9 @@ export class Hud {
   renderWeapon(ctx, player, gameState, w, h) {
     const weapon = gameState.currentWeapon;
     // The weapon art is authored ~120px wide, bottom-anchored at (w/2, h).
-    // Scale it up so it fills a chunky slice of the screen like a real
-    // first-person viewmodel instead of a tiny floating prop.
-    const s = Math.max(2.1, Math.min(3.4, h / 300));
+    // Scale with BOTH axes so portrait phones don't get a screen-filling
+    // staff, and push it toward the right edge, clear of the crosshair.
+    const s = Math.max(1.7, Math.min(3.4, Math.min(h / 300, w / 250)));
     const bobX = Math.sin(gameState.walkCycle * 2) * 6;
     const bobY = Math.abs(Math.cos(gameState.walkCycle * 2)) * 5;
     const sway = Math.sin(gameState.time * 1.1) * 4; // idle drift
@@ -110,8 +122,8 @@ export class Hud {
     const weaponX = w / 2 - 60 + bobX + sway;
     const weaponY = h - 180 + bobY + fireOffset;
 
-    const rightShift = w * 0.05;
-    const downShift = h * 0.06;
+    const rightShift = w * (w < h ? 0.19 : 0.13);
+    const downShift = h * 0.08;
     ctx.save();
     // Grow the viewmodel from a bottom anchor nudged right/down so the staff
     // sits to the side of the crosshair instead of over it.
@@ -230,22 +242,22 @@ export class Hud {
     ctx.fillRect(x + 4, wrapY + 44, 104, 3);
 
     // Fist
-    const hg = ctx.createRadialGradient(cx - 5, y + 95, 4, cx, y + 103, 27);
+    const hg = ctx.createRadialGradient(cx - 4, y + 97, 3, cx, y + 104, 20);
     hg.addColorStop(0, '#8c6a4b');
     hg.addColorStop(1, '#4a3624');
     ctx.fillStyle = hg;
     ctx.beginPath();
-    ctx.ellipse(cx, y + 103, 25, 21, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, y + 104, 18, 15, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#6b4f37';
     for (let i = 0; i < 4; i++) {
       ctx.beginPath();
-      ctx.ellipse(cx - 17 + i * 11, y + 92, 5, 6, 0, 0, Math.PI * 2);
+      ctx.ellipse(cx - 12 + i * 8, y + 95, 4, 5, 0, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.fillStyle = 'rgba(0,0,0,0.25)';
     ctx.beginPath();
-    ctx.ellipse(cx, y + 120, 22, 8, 0, 0, Math.PI * 2);
+    ctx.ellipse(cx, y + 116, 15, 6, 0, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -269,91 +281,139 @@ export class Hud {
     ctx.fill();
   }
 
+  // A proper trishula: dark polished shaft, gold collar, crescent yoke and
+  // three leaf-shaped steel prongs with a faint sacred glow at the tips.
   drawTrishul(ctx, x, y, gs) {
-    const cx = x + 58;
-    const shaftGrad = ctx.createLinearGradient(cx - 5, y + 50, cx + 5, y + 50);
-    shaftGrad.addColorStop(0, '#665544');
-    shaftGrad.addColorStop(0.3, '#998877');
-    shaftGrad.addColorStop(0.5, '#aa9988');
-    shaftGrad.addColorStop(0.7, '#998877');
-    shaftGrad.addColorStop(1, '#554433');
+    const cx = x + 52; // aligned with the fist
+    const t = gs.time || 0;
+
+    // --- Shaft: dark wood cylinder shading, slight taper, gold inlays
+    const shaftGrad = ctx.createLinearGradient(cx - 6, 0, cx + 6, 0);
+    shaftGrad.addColorStop(0, '#2e1d10');
+    shaftGrad.addColorStop(0.35, '#6b4a2a');
+    shaftGrad.addColorStop(0.5, '#7d5a36');
+    shaftGrad.addColorStop(0.65, '#5c3f24');
+    shaftGrad.addColorStop(1, '#241508');
     ctx.fillStyle = shaftGrad;
-    ctx.fillRect(cx - 4, y + 35, 8, 145);
-
-    for (let i = 0; i < 4; i++) {
-      const bandY = y + 55 + i * 28;
-      ctx.fillStyle = '#c0a030';
-      ctx.fillRect(cx - 5, bandY, 10, 3);
-      ctx.fillStyle = '#e8c840';
-      ctx.fillRect(cx - 4, bandY + 1, 8, 1);
+    ctx.beginPath();
+    ctx.moveTo(cx - 4.5, y + 38);
+    ctx.lineTo(cx + 4.5, y + 38);
+    ctx.lineTo(cx + 6, y + 195);
+    ctx.lineTo(cx - 6, y + 195);
+    ctx.closePath();
+    ctx.fill();
+    // Specular streak down the shaft
+    ctx.strokeStyle = 'rgba(255,220,160,0.18)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(cx - 1.5, y + 40);
+    ctx.lineTo(cx - 2.5, y + 193);
+    ctx.stroke();
+    // Gold inlay bands
+    for (let i = 0; i < 3; i++) {
+      const bandY = y + 66 + i * 34;
+      ctx.fillStyle = '#8a6a1a';
+      ctx.fillRect(cx - 5.5, bandY, 11, 4);
+      ctx.fillStyle = '#e8c445';
+      ctx.fillRect(cx - 5, bandY + 1, 10, 1.6);
     }
 
-    ctx.fillStyle = '#b0c0d8';
+    // --- Gold collar (ferrule) where the head meets the shaft
+    const collarY = y + 24;
+    const cg = ctx.createLinearGradient(0, collarY, 0, collarY + 16);
+    cg.addColorStop(0, '#f4d060');
+    cg.addColorStop(0.5, '#b8902c');
+    cg.addColorStop(1, '#6e5312');
+    ctx.fillStyle = cg;
     ctx.beginPath();
-    ctx.moveTo(cx - 3, y + 35);
-    ctx.lineTo(cx + 3, y + 35);
-    ctx.lineTo(cx + 4, y + 5);
-    ctx.lineTo(cx, y - 20);
-    ctx.lineTo(cx - 4, y + 5);
+    ctx.moveTo(cx - 7, collarY);
+    ctx.lineTo(cx + 7, collarY);
+    ctx.lineTo(cx + 5, collarY + 15);
+    ctx.lineTo(cx - 5, collarY + 15);
     ctx.closePath();
     ctx.fill();
-    ctx.fillStyle = '#d0e0f0';
-    ctx.beginPath();
-    ctx.moveTo(cx - 1, y + 30);
-    ctx.lineTo(cx + 1, y + 30);
-    ctx.lineTo(cx + 1, y + 5);
-    ctx.lineTo(cx, y - 15);
-    ctx.lineTo(cx - 1, y + 5);
-    ctx.closePath();
-    ctx.fill();
+    ctx.fillStyle = '#f8e090';
+    ctx.fillRect(cx - 7, collarY + 2, 14, 1.6);
 
-    ctx.fillStyle = '#a0b0c8';
+    // --- Red prayer cloth tied at the collar, tail swaying
+    const swayC = Math.sin(t * 2.2) * 4;
+    ctx.fillStyle = '#a31414';
     ctx.beginPath();
-    ctx.moveTo(cx - 8, y + 38);
-    ctx.lineTo(cx - 5, y + 38);
-    ctx.lineTo(cx - 14, y + 8);
-    ctx.lineTo(cx - 20, y - 8);
-    ctx.lineTo(cx - 22, y - 5);
-    ctx.lineTo(cx - 16, y + 10);
+    ctx.moveTo(cx - 6, collarY + 9);
+    ctx.quadraticCurveTo(cx - 14 + swayC, collarY + 26, cx - 9 + swayC * 1.6, collarY + 46);
+    ctx.quadraticCurveTo(cx - 4 + swayC, collarY + 30, cx - 1, collarY + 14);
     ctx.closePath();
     ctx.fill();
-
+    ctx.fillStyle = '#7d0e0e';
     ctx.beginPath();
-    ctx.moveTo(cx + 5, y + 38);
-    ctx.lineTo(cx + 8, y + 38);
-    ctx.lineTo(cx + 16, y + 10);
-    ctx.lineTo(cx + 22, y - 5);
-    ctx.lineTo(cx + 20, y - 8);
-    ctx.lineTo(cx + 14, y + 8);
+    ctx.moveTo(cx - 3, collarY + 12);
+    ctx.quadraticCurveTo(cx - 8 + swayC, collarY + 24, cx - 6 + swayC * 1.4, collarY + 38);
+    ctx.quadraticCurveTo(cx - 2, collarY + 24, cx, collarY + 13);
     ctx.closePath();
     ctx.fill();
 
-    ctx.fillStyle = 'rgba(150,200,255,0.6)';
-    ctx.beginPath();
-    ctx.arc(cx, y - 18, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(cx - 21, y - 6, 3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(cx + 21, y - 6, 3, 0, Math.PI * 2);
-    ctx.fill();
+    // --- Steel: shared gradient for yoke and prongs
+    const steel = ctx.createLinearGradient(cx - 26, 0, cx + 26, 0);
+    steel.addColorStop(0, '#5a6878');
+    steel.addColorStop(0.5, '#d6e2f0');
+    steel.addColorStop(1, '#6b7a90');
 
-    ctx.fillStyle = '#c0a030';
-    ctx.fillRect(cx - 18, y + 33, 36, 6);
-    ctx.fillStyle = '#e8c840';
-    ctx.fillRect(cx - 16, y + 35, 32, 2);
+    // Crescent yoke joining the three prongs
+    ctx.strokeStyle = steel;
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx, y + 2, 21, Math.PI * 0.08, Math.PI * 0.92, false);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(cx, y + 1, 23, Math.PI * 0.15, Math.PI * 0.85, false);
+    ctx.stroke();
 
-    ctx.fillStyle = '#8B6914';
-    ctx.fillRect(cx - 16, y + 145, 14, 30);
-    ctx.fillStyle = '#9B7924';
-    ctx.fillRect(cx - 14, y + 148, 10, 24);
-    ctx.fillStyle = '#7B5904';
-    for (let f = 0; f < 4; f++) {
-      ctx.fillRect(cx - 6, y + 148 + f * 6, 10, 3);
+    // Leaf-shaped blade helper
+    const blade = (bx, byTip, byBase, wHalf, curve) => {
+      ctx.beginPath();
+      ctx.moveTo(bx, byTip);
+      ctx.quadraticCurveTo(bx + wHalf + curve, (byTip + byBase) / 2, bx, byBase);
+      ctx.quadraticCurveTo(bx - wHalf + curve, (byTip + byBase) / 2, bx, byTip);
+      ctx.closePath();
+      ctx.fill();
+      // Center ridge
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(bx, byTip + 4);
+      ctx.lineTo(bx + curve * 0.4, byBase - 4);
+      ctx.stroke();
+    };
+
+    ctx.fillStyle = steel;
+    // Side prongs: rise from the crescent tips, curving gently inward
+    blade(cx - 21, y - 34, y + 6, 6.5, 2);
+    blade(cx + 21, y - 34, y + 6, 6.5, -2);
+    // Center prong: taller and broader
+    blade(cx, y - 52, y + 12, 8.5, 0);
+
+    // Small gold beads where prongs meet the crescent
+    ctx.fillStyle = '#e8c445';
+    for (const bx of [cx - 21, cx, cx + 21]) {
+      ctx.beginPath();
+      ctx.arc(bx, y + 9, 3, 0, Math.PI * 2);
+      ctx.fill();
     }
-    ctx.fillStyle = '#8B6914';
-    ctx.fillRect(cx + 2, y + 145, 8, 20);
+
+    // --- Sacred glow at the tips (brightens as you fire)
+    const glowA = 0.2 + Math.sin(t * 3) * 0.05 + (gs.fireAnim || 0) * 0.5;
+    for (const [gx, gy, gr] of [[cx, y - 50, 7], [cx - 21, y - 32, 5], [cx + 21, y - 32, 5]]) {
+      const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr * 1.7);
+      g.addColorStop(0, `rgba(200,230,255,${glowA})`);
+      g.addColorStop(1, 'rgba(150,195,255,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(gx, gy, gr * 1.7, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   drawAgni(ctx, x, y, gs) {
@@ -621,70 +681,94 @@ export class Hud {
   }
 
   renderHUD(ctx, player, gameState, w, h) {
-    const hudHeight = 60;
+    const compact = w < 700;
+    const hudHeight = compact ? 48 : 60;
     const hudY = h - hudHeight;
 
-    ctx.fillStyle = 'rgba(12, 6, 4, 0.82)';
+    const bg = ctx.createLinearGradient(0, hudY, 0, h);
+    bg.addColorStop(0, 'rgba(16, 9, 5, 0.78)');
+    bg.addColorStop(1, 'rgba(6, 3, 2, 0.92)');
+    ctx.fillStyle = bg;
     ctx.fillRect(0, hudY, w, hudHeight);
+    ctx.fillStyle = 'rgba(200, 160, 0, 0.55)';
+    ctx.fillRect(0, hudY, w, 1.5);
 
-    ctx.strokeStyle = '#7a6200';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(1, hudY + 1, w - 2, hudHeight - 2);
+    const fLabel = compact ? 9 : 13;
+    const fBig = compact ? 20 : 27;
+    const yLabel = hudY + (compact ? 13 : 18);
+    const yBig = hudY + (compact ? 36 : 46);
 
-    ctx.fillStyle = '#ff4444';
-    ctx.font = 'bold 14px monospace';
-    ctx.fillText('UYIR', 20, hudY + 20);
-    ctx.font = 'bold 28px monospace';
-    ctx.fillStyle = player.health > 25 ? '#ff4444' : '#ff0000';
-    ctx.fillText(`${Math.ceil(player.health)}%`, 20, hudY + 48);
+    // --- Left: health number + bar, armor beside
+    ctx.fillStyle = '#c25050';
+    ctx.font = `bold ${fLabel}px monospace`;
+    ctx.fillText('UYIR', 12, yLabel);
+    ctx.font = `bold ${fBig}px monospace`;
+    ctx.fillStyle = player.health > 25 ? '#ff5a4a' : '#ff1500';
+    const hpText = `${Math.ceil(player.health)}`;
+    ctx.fillText(hpText, 12, yBig);
+    const hpW = ctx.measureText(hpText).width;
 
+    const barX = 12 + hpW + 10;
+    const barW = compact ? Math.min(72, w * 0.18) : 110;
     ctx.fillStyle = '#330000';
-    ctx.fillRect(110, hudY + 10, 120, 16);
-    ctx.fillStyle = player.health > 50 ? '#00cc44' : player.health > 25 ? '#ccaa00' : '#cc0000';
-    ctx.fillRect(110, hudY + 10, (player.health / 100) * 120, 16);
-    ctx.strokeStyle = '#666';
-    ctx.strokeRect(110, hudY + 10, 120, 16);
-
+    ctx.fillRect(barX, yBig - (compact ? 13 : 16), barW, compact ? 8 : 11);
+    ctx.fillStyle = player.health > 50 ? '#3fbf5a' : player.health > 25 ? '#ccaa00' : '#cc2000';
+    ctx.fillRect(barX, yBig - (compact ? 13 : 16), (Math.max(0, player.health) / 100) * barW, compact ? 8 : 11);
+    // Armor as a thin blue bar under health
+    ctx.fillStyle = '#101c33';
+    ctx.fillRect(barX, yBig - (compact ? 2 : 2), barW, compact ? 4 : 5);
     ctx.fillStyle = '#4488ff';
-    ctx.font = 'bold 14px monospace';
-    ctx.fillText('KAVACHAM', 110, hudY + 48);
-    ctx.font = 'bold 20px monospace';
-    ctx.fillText(`${Math.ceil(player.armor)}%`, 200, hudY + 48);
+    ctx.fillRect(barX, yBig - (compact ? 2 : 2), (Math.max(0, player.armor) / 100) * barW, compact ? 4 : 5);
+    ctx.fillStyle = 'rgba(120,160,255,0.85)';
+    ctx.font = `bold ${fLabel}px monospace`;
+    ctx.fillText('KAVACHAM', barX, yLabel);
 
+    // --- Right: weapon + ammo, kills beneath
     const weaponNames = {
       trishul: 'TRISHUL', agni: 'AGNI', chakra: 'CHAKRA', brahmastra: 'BRAHMASTRA',
     };
+    ctx.textAlign = 'right';
     ctx.fillStyle = '#ffaa00';
-    ctx.font = 'bold 14px monospace';
-    ctx.fillText(weaponNames[gameState.currentWeapon] || 'TRISHUL', w - 200, hudY + 20);
-    ctx.font = 'bold 28px monospace';
+    ctx.font = `bold ${fLabel}px monospace`;
+    ctx.fillText(weaponNames[gameState.currentWeapon] || 'TRISHUL', w - 12, yLabel);
+    ctx.font = `bold ${fBig}px monospace`;
     const ammo = gameState.ammo[gameState.currentWeapon];
-    ctx.fillText(ammo === Infinity ? 'INF' : `${Math.floor(ammo)}`, w - 200, hudY + 48);
+    const ammoText = ammo === Infinity ? '∞' : `${Math.floor(ammo)}`;
+    ctx.fillText(ammoText, w - 12, yBig);
+    const ammoW = ctx.measureText(ammoText).width;
+    ctx.fillStyle = '#999';
+    ctx.font = `${fLabel}px monospace`;
+    ctx.fillText(`KOLAI ${gameState.kills}/${gameState.totalEnemies}`, w - 22 - ammoW, yBig);
+    ctx.textAlign = 'left';
 
-    let keyX = w / 2 - 40;
-    ctx.font = 'bold 12px monospace';
-    if (gameState.keys.red) {
-      ctx.fillStyle = '#ff0044';
-      ctx.fillText('SEVI', keyX, hudY + 20);
-    }
-    if (gameState.keys.blue) {
-      ctx.fillStyle = '#0088ff';
-      ctx.fillText('NEELAM', keyX, hudY + 40);
-    }
-    if (gameState.keys.gold) {
-      ctx.fillStyle = '#ffcc00';
-      ctx.fillText('THANGAM', keyX + 55, hudY + 20);
+    // --- Center: key gems + level name
+    const keyDefs = [
+      ['red', '#ff2a55'], ['blue', '#3d8bff'], ['gold', '#ffcc22'],
+    ];
+    let kx = w / 2 - 24;
+    for (const [key, color] of keyDefs) {
+      if (gameState.keys[key]) {
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(kx, yLabel - 9);
+        ctx.lineTo(kx + 6, yLabel - 3);
+        ctx.lineTo(kx, yLabel + 3);
+        ctx.lineTo(kx - 6, yLabel - 3);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        ctx.strokeStyle = 'rgba(150,150,150,0.25)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(kx - 4, yLabel - 8, 8, 8);
+      }
+      kx += 24;
     }
 
     ctx.fillStyle = '#c8a000';
-    ctx.font = 'bold 12px monospace';
+    ctx.font = `bold ${compact ? 10 : 12}px monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText(`NILAI ${gameState.level} - ${gameState.levelName}`, w / 2, hudY + 55);
+    ctx.fillText(`NILAI ${gameState.level} · ${gameState.levelName}`, w / 2, hudY + hudHeight - 7);
     ctx.textAlign = 'left';
-
-    ctx.fillStyle = '#aaa';
-    ctx.font = '12px monospace';
-    ctx.fillText(`KOLAI: ${gameState.kills}/${gameState.totalEnemies}`, w - 120, hudY + 48);
 
     // Compass arrow pointing to the level exit
     if (gameState.exit) {
@@ -742,102 +826,167 @@ export class Hud {
   }
 
   renderMinimap(ctx, player, map, sprites, gameState, w, h) {
-    const expanded = !!gameState.mapExpanded;
-    let scale = expanded ? MINIMAP_SCALE_EXPANDED : MINIMAP_SCALE;
-
-    if (expanded) {
-      const maxByW = (w * 0.85) / (map.width * TILE_SIZE);
-      const maxByH = (h * 0.85) / (map.height * TILE_SIZE);
-      scale = Math.min(scale, maxByW, maxByH);
+    if (gameState.mapExpanded) {
+      this.renderFullMap(ctx, player, map, sprites, gameState, w, h);
+      return;
     }
 
-    const size = TILE_SIZE * scale;
-    const mapW = map.width * size;
-    const mapH = map.height * size;
-    const offsetX = expanded ? Math.floor((w - mapW) / 2) : 10;
-    const offsetY = expanded ? Math.floor((h - mapH) / 2) : 10;
+    // Compact player-centered radar pinned to a corner; the full map is on M.
+    const size = Math.round(Math.min(150, Math.max(92, Math.min(w, h) * 0.22)));
+    const mx = 12;
+    const my = this.touch ? 82 : 12; // below the MAP button on phones
+    const cx = mx + size / 2;
+    const cy = my + size / 2;
+    const r = size / 2;
+    const viewTiles = 8.5;          // world radius shown, in tiles
+    const ts = r / viewTiles;       // px per tile
+    const ptx = player.x / TILE_SIZE;
+    const pty = player.y / TILE_SIZE;
 
     ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(4, 3, 2, 0.78)';
+    ctx.fill();
+    ctx.clip();
 
-    if (expanded) {
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
-      ctx.fillRect(0, 0, w, h);
-    }
-
-    ctx.globalAlpha = expanded ? 0.96 : 0.72;
-
-    ctx.fillStyle = '#000';
-    ctx.fillRect(offsetX - 2, offsetY - 2, mapW + 4, mapH + 4);
-
-    ctx.strokeStyle = '#c8a000';
-    ctx.lineWidth = expanded ? 2 : 1;
-    ctx.strokeRect(offsetX - 2, offsetY - 2, mapW + 4, mapH + 4);
-
-    for (let y = 0; y < map.height; y++) {
-      for (let x = 0; x < map.width; x++) {
+    const x0 = Math.max(0, Math.floor(ptx - viewTiles) - 1);
+    const x1 = Math.min(map.width - 1, Math.ceil(ptx + viewTiles) + 1);
+    const y0 = Math.max(0, Math.floor(pty - viewTiles) - 1);
+    const y1 = Math.min(map.height - 1, Math.ceil(pty + viewTiles) + 1);
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
         const tile = map.getTile(x, y);
-        if (tile > 0) {
-          const colors = ['', '#8B7355', '#AA4444', '#555566', '#C8A000',
-            '#664422', '#aa2244', '#2266aa', '#aa8822', '#8B7355'];
-          ctx.fillStyle = colors[tile] || '#888';
-          ctx.fillRect(offsetX + x * size, offsetY + y * size, size, size);
-        }
+        if (tile <= 0) continue;
+        ctx.fillStyle = MAP_COLORS[tile] || '#888';
+        ctx.fillRect(cx + (x - ptx) * ts, cy + (y - pty) * ts, ts + 0.5, ts + 0.5);
       }
     }
 
-    if (gameState.exit && gameState.exitOpen !== false) {
-      const ex = offsetX + (gameState.exit.x + 0.5) * size;
-      const ey = offsetY + (gameState.exit.y + 0.5) * size;
-      const t = gameState.time || 0;
-      const pulse = 0.5 + 0.5 * Math.sin(t * 5);
-      const r = size * (1.0 + pulse * 0.5);
-      const halo = ctx.createRadialGradient(ex, ey, 0, ex, ey, r * 2.5);
-      halo.addColorStop(0, `rgba(255, 230, 60, ${0.6 + 0.3 * pulse})`);
-      halo.addColorStop(1, 'rgba(255, 230, 60, 0)');
-      ctx.fillStyle = halo;
-      ctx.fillRect(ex - r * 2.5, ey - r * 2.5, r * 5, r * 5);
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = expanded ? 2 : 1.5;
+    if (gameState.exit) {
+      const ex = cx + (gameState.exit.x + 0.5 - ptx) * ts;
+      const ey = cy + (gameState.exit.y + 0.5 - pty) * ts;
+      const pulse = 0.5 + 0.5 * Math.sin((gameState.time || 0) * 5);
+      ctx.strokeStyle = `rgba(255,240,120,${0.6 + 0.4 * pulse})`;
+      ctx.lineWidth = 2;
+      const er = ts * 0.8;
       ctx.beginPath();
-      ctx.moveTo(ex - r, ey - r); ctx.lineTo(ex + r, ey + r);
-      ctx.moveTo(ex + r, ey - r); ctx.lineTo(ex - r, ey + r);
+      ctx.moveTo(ex - er, ey - er); ctx.lineTo(ex + er, ey + er);
+      ctx.moveTo(ex + er, ey - er); ctx.lineTo(ex - er, ey + er);
       ctx.stroke();
     }
 
     for (const s of sprites) {
       if (!s.active || !['asura', 'rakshasa', 'naga'].includes(s.type)) continue;
-      ctx.fillStyle = s.boss ? '#ffcc00' : '#ff0000';
-      const r = (s.boss ? 4 : 2) * (expanded ? 1.4 : 1);
-      ctx.fillRect(
-        offsetX + (s.x / TILE_SIZE) * size - r / 2,
-        offsetY + (s.y / TILE_SIZE) * size - r / 2,
-        r, r,
-      );
+      const dx = s.x / TILE_SIZE - ptx;
+      const dy = s.y / TILE_SIZE - pty;
+      if (dx * dx + dy * dy > viewTiles * viewTiles) continue;
+      ctx.fillStyle = s.boss ? '#ffcc00' : '#ff2a2a';
+      ctx.beginPath();
+      ctx.arc(cx + dx * ts, cy + dy * ts, s.boss ? 3 : 2, 0, Math.PI * 2);
+      ctx.fill();
     }
 
-    ctx.fillStyle = '#00ff00';
+    // Player arrow at the center (map stays north-up; arrow shows facing)
+    ctx.translate(cx, cy);
+    ctx.rotate(player.angle);
+    ctx.fillStyle = '#33ff77';
+    ctx.beginPath();
+    ctx.moveTo(7, 0);
+    ctx.lineTo(-5, -4.5);
+    ctx.lineTo(-2.5, 0);
+    ctx.lineTo(-5, 4.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(200, 160, 0, 0.75)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  renderFullMap(ctx, player, map, sprites, gameState, w, h) {
+    const scale = Math.min(
+      (w * 0.85) / (map.width * TILE_SIZE),
+      (h * 0.78) / (map.height * TILE_SIZE),
+    );
+    const size = TILE_SIZE * scale;
+    const mapW = map.width * size;
+    const mapH = map.height * size;
+    const offsetX = Math.floor((w - mapW) / 2);
+    const offsetY = Math.floor((h - mapH) / 2);
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.fillStyle = 'rgba(4,3,2,0.92)';
+    ctx.fillRect(offsetX - 3, offsetY - 3, mapW + 6, mapH + 6);
+    ctx.strokeStyle = '#c8a000';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(offsetX - 3, offsetY - 3, mapW + 6, mapH + 6);
+
+    for (let y = 0; y < map.height; y++) {
+      for (let x = 0; x < map.width; x++) {
+        const tile = map.getTile(x, y);
+        if (tile <= 0) continue;
+        ctx.fillStyle = MAP_COLORS[tile] || '#888';
+        ctx.fillRect(offsetX + x * size, offsetY + y * size, size + 0.5, size + 0.5);
+      }
+    }
+
+    if (gameState.exit) {
+      const ex = offsetX + (gameState.exit.x + 0.5) * size;
+      const ey = offsetY + (gameState.exit.y + 0.5) * size;
+      const pulse = 0.5 + 0.5 * Math.sin((gameState.time || 0) * 5);
+      const rr = size * (1.0 + pulse * 0.5);
+      const halo = ctx.createRadialGradient(ex, ey, 0, ex, ey, rr * 2.5);
+      halo.addColorStop(0, `rgba(255, 230, 60, ${0.6 + 0.3 * pulse})`);
+      halo.addColorStop(1, 'rgba(255, 230, 60, 0)');
+      ctx.fillStyle = halo;
+      ctx.fillRect(ex - rr * 2.5, ey - rr * 2.5, rr * 5, rr * 5);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(ex - rr, ey - rr); ctx.lineTo(ex + rr, ey + rr);
+      ctx.moveTo(ex + rr, ey - rr); ctx.lineTo(ex - rr, ey + rr);
+      ctx.stroke();
+    }
+
+    for (const s of sprites) {
+      if (!s.active || !['asura', 'rakshasa', 'naga'].includes(s.type)) continue;
+      ctx.fillStyle = s.boss ? '#ffcc00' : '#ff2a2a';
+      const er = s.boss ? 4 : 2.5;
+      ctx.beginPath();
+      ctx.arc(offsetX + (s.x / TILE_SIZE) * size, offsetY + (s.y / TILE_SIZE) * size, er, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     const px = offsetX + (player.x / TILE_SIZE) * size;
     const py = offsetY + (player.y / TILE_SIZE) * size;
-    const pr = expanded ? 4 : 2;
-    ctx.fillRect(px - pr, py - pr, pr * 2, pr * 2);
-
-    ctx.strokeStyle = '#00ff00';
-    ctx.lineWidth = expanded ? 2 : 1;
-    const dirLen = expanded ? 18 : 10;
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(player.angle);
+    ctx.fillStyle = '#33ff77';
     ctx.beginPath();
-    ctx.moveTo(px, py);
-    ctx.lineTo(px + Math.cos(player.angle) * dirLen, py + Math.sin(player.angle) * dirLen);
-    ctx.stroke();
+    ctx.moveTo(9, 0);
+    ctx.lineTo(-6, -5.5);
+    ctx.lineTo(-3, 0);
+    ctx.lineTo(-6, 5.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
 
-    if (expanded) {
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = '#c8a000';
-      ctx.font = 'bold 14px monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('PADAM (M to close)', w / 2, Math.max(20, offsetY - 10));
-      ctx.textAlign = 'left';
-    }
-
+    ctx.fillStyle = '#c8a000';
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(this.touch ? 'PADAM (MAP button to close)' : 'PADAM (M to close)', w / 2, Math.max(20, offsetY - 10));
+    ctx.textAlign = 'left';
     ctx.restore();
   }
 }

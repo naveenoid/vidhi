@@ -4,13 +4,21 @@
 
 import * as THREE from 'three';
 
-const S = 128; // frame size in px
+const S = 128; // logical frame size the art below is authored in
+const SS = 2;  // supersample factor: canvases are 256px for crisp billboards
 
 function frame() {
   const c = document.createElement('canvas');
-  c.width = S;
-  c.height = S;
+  c.width = S * SS;
+  c.height = S * SS;
   return c;
+}
+
+// Context scaled so painters keep drawing in the authored 128px space
+function frameCtx(c) {
+  const ctx = c.getContext('2d');
+  ctx.scale(SS, SS);
+  return ctx;
 }
 
 function toTexture(canvas) {
@@ -428,7 +436,7 @@ const PAINTERS = {
 function bakeEnemyFrames(painter) {
   const bake = (pose) => {
     const c = frame();
-    painter(c.getContext('2d'), pose);
+    painter(frameCtx(c), pose);
     return toTexture(c);
   };
   return {
@@ -623,7 +631,7 @@ function paintPortal(ctx) {
 
 function bakeSimple(painter, ...args) {
   const c = frame();
-  painter(c.getContext('2d'), ...args);
+  painter(frameCtx(c), ...args);
   return toTexture(c);
 }
 
