@@ -360,52 +360,64 @@ export class Hud {
 
     // Crescent yoke joining the three prongs
     ctx.strokeStyle = steel;
-    ctx.lineWidth = 7;
+    ctx.lineWidth = 5.5;
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.arc(cx, y + 2, 21, Math.PI * 0.08, Math.PI * 0.92, false);
+    ctx.arc(cx, y + 4, 20, Math.PI * 0.05, Math.PI * 0.95, false);
     ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
-    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+    ctx.lineWidth = 1.4;
     ctx.beginPath();
-    ctx.arc(cx, y + 1, 23, Math.PI * 0.15, Math.PI * 0.85, false);
+    ctx.arc(cx, y + 3, 21.6, Math.PI * 0.12, Math.PI * 0.88, false);
     ctx.stroke();
+    // Steel stem carrying the center prong up from the collar
+    ctx.fillStyle = '#9daabd';
+    ctx.fillRect(cx - 2, y + 2, 4, 24);
 
-    // Leaf-shaped blade helper
-    const blade = (bx, byTip, byBase, wHalf, curve) => {
+    // Two-tone blade: lit left facet, shaded right facet, center ridge —
+    // slim and near-vertical like a real trishula, not a drooping leaf.
+    const blade = (bx, tipY, baseY, wHalf, lean) => {
+      const midY = (tipY + baseY) / 2;
+      ctx.fillStyle = '#8fa0b6';
       ctx.beginPath();
-      ctx.moveTo(bx, byTip);
-      ctx.quadraticCurveTo(bx + wHalf + curve, (byTip + byBase) / 2, bx, byBase);
-      ctx.quadraticCurveTo(bx - wHalf + curve, (byTip + byBase) / 2, bx, byTip);
+      ctx.moveTo(bx + lean, tipY);
+      ctx.quadraticCurveTo(bx + wHalf, midY, bx + wHalf * 0.55, baseY);
+      ctx.lineTo(bx - wHalf * 0.55, baseY);
+      ctx.quadraticCurveTo(bx - wHalf, midY, bx + lean, tipY);
       ctx.closePath();
       ctx.fill();
-      // Center ridge
-      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
-      ctx.lineWidth = 1.2;
+      ctx.fillStyle = '#e6eef8';
       ctx.beginPath();
-      ctx.moveTo(bx, byTip + 4);
-      ctx.lineTo(bx + curve * 0.4, byBase - 4);
+      ctx.moveTo(bx + lean, tipY);
+      ctx.quadraticCurveTo(bx - wHalf, midY, bx - wHalf * 0.55, baseY);
+      ctx.lineTo(bx, baseY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(30,40,60,0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(bx + lean, tipY);
+      ctx.quadraticCurveTo(bx + wHalf, midY, bx + wHalf * 0.55, baseY);
       ctx.stroke();
     };
 
-    ctx.fillStyle = steel;
-    // Side prongs: rise from the crescent tips, curving gently inward
-    blade(cx - 21, y - 34, y + 6, 6.5, 2);
-    blade(cx + 21, y - 34, y + 6, 6.5, -2);
-    // Center prong: taller and broader
-    blade(cx, y - 52, y + 12, 8.5, 0);
+    // Side prongs rise straight off the crescent tips, leaning slightly in
+    blade(cx - 20, y - 34, y + 6, 4.8, 1.5);
+    blade(cx + 20, y - 34, y + 6, 4.8, -1.5);
+    // Center prong: longer spear blade
+    blade(cx, y - 54, y + 4, 6, 0);
 
     // Small gold beads where prongs meet the crescent
     ctx.fillStyle = '#e8c445';
-    for (const bx of [cx - 21, cx, cx + 21]) {
+    for (const bx of [cx - 20, cx, cx + 20]) {
       ctx.beginPath();
-      ctx.arc(bx, y + 9, 3, 0, Math.PI * 2);
+      ctx.arc(bx, y + 6, 2.5, 0, Math.PI * 2);
       ctx.fill();
     }
 
     // --- Sacred glow at the tips (brightens as you fire)
     const glowA = 0.2 + Math.sin(t * 3) * 0.05 + (gs.fireAnim || 0) * 0.5;
-    for (const [gx, gy, gr] of [[cx, y - 50, 7], [cx - 21, y - 32, 5], [cx + 21, y - 32, 5]]) {
+    for (const [gx, gy, gr] of [[cx, y - 52, 7], [cx - 20, y - 32, 5], [cx + 20, y - 32, 5]]) {
       const g = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr * 1.7);
       g.addColorStop(0, `rgba(200,230,255,${glowA})`);
       g.addColorStop(1, 'rgba(150,195,255,0)');
