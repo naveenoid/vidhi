@@ -356,7 +356,7 @@ export class Renderer3D {
     else tex = this.frames.pickups[sprite.type];
     const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
     const s = new THREE.Sprite(mat);
-    s.scale.set(0.42, 0.42, 1);
+    s.scale.set(0.48, 0.48, 1);
     return s;
   }
 
