@@ -428,268 +428,435 @@ export class Hud {
     }
   }
 
-  drawAgni(ctx, x, y, gs) {
-    const bodyGrad = ctx.createLinearGradient(x + 25, y + 55, x + 95, y + 55);
-    bodyGrad.addColorStop(0, '#882200');
-    bodyGrad.addColorStop(0.3, '#cc4400');
-    bodyGrad.addColorStop(0.5, '#dd5510');
-    bodyGrad.addColorStop(0.7, '#cc4400');
-    bodyGrad.addColorStop(1, '#882200');
-    ctx.fillStyle = bodyGrad;
-    ctx.fillRect(x + 25, y + 52, 70, 28);
-
-    ctx.strokeStyle = '#ff8833';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(x + 28, y + 55, 64, 22);
-    ctx.fillStyle = '#ffaa44';
-    ctx.fillRect(x + 50, y + 58, 20, 3);
-    ctx.fillRect(x + 50, y + 70, 20, 3);
-
-    const bGrad = ctx.createLinearGradient(x + 32, y + 20, x + 50, y + 20);
-    bGrad.addColorStop(0, '#772200');
-    bGrad.addColorStop(0.4, '#aa4422');
-    bGrad.addColorStop(0.6, '#993311');
-    bGrad.addColorStop(1, '#661800');
-    ctx.fillStyle = bGrad;
-    ctx.fillRect(x + 33, y + 18, 16, 50);
-    ctx.fillStyle = '#331100';
-    ctx.fillRect(x + 35, y + 18, 12, 4);
-    for (let v = 0; v < 3; v++) {
-      ctx.fillStyle = '#551100';
-      ctx.fillRect(x + 33, y + 28 + v * 10, 16, 2);
-    }
-
-    ctx.fillStyle = bGrad;
-    ctx.fillRect(x + 68, y + 18, 16, 50);
-    ctx.fillStyle = '#331100';
-    ctx.fillRect(x + 70, y + 18, 12, 4);
-    for (let v = 0; v < 3; v++) {
-      ctx.fillStyle = '#551100';
-      ctx.fillRect(x + 68, y + 28 + v * 10, 16, 2);
-    }
-
-    if (gs.fireAnim > 0) {
-      const intensity = gs.fireAnim;
-      ctx.fillStyle = `rgba(255, 180, 50, ${intensity * 0.6})`;
-      ctx.beginPath();
-      ctx.arc(x + 41, y + 14, 14 * intensity, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = `rgba(255, 80, 0, ${intensity * 0.4})`;
-      ctx.beginPath();
-      ctx.arc(x + 41, y + 8, 20 * intensity, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = `rgba(255, 180, 50, ${intensity * 0.6})`;
-      ctx.beginPath();
-      ctx.arc(x + 76, y + 14, 14 * intensity, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = `rgba(255, 80, 0, ${intensity * 0.4})`;
-      ctx.beginPath();
-      ctx.arc(x + 76, y + 8, 20 * intensity, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    const ember = Math.sin(gs.time * 3) * 0.15 + 0.25;
-    ctx.fillStyle = `rgba(255, 100, 20, ${ember})`;
+  // Shared: a lacquered temple-wood haft running down through the fist, with
+  // gold ferrules. Every weapon below is built on one so the hand always has
+  // something believable to grip.
+  drawHaft(ctx, cx, top, bottom, halfW, bands) {
+    const g = ctx.createLinearGradient(cx - halfW, 0, cx + halfW, 0);
+    g.addColorStop(0, '#241508');
+    g.addColorStop(0.35, '#6b4a2a');
+    g.addColorStop(0.5, '#7d5a36');
+    g.addColorStop(0.68, '#523a20');
+    g.addColorStop(1, '#1d1106');
+    ctx.fillStyle = g;
     ctx.beginPath();
-    ctx.arc(x + 58, y + 40, 8, 0, Math.PI * 2);
+    ctx.moveTo(cx - halfW, top);
+    ctx.lineTo(cx + halfW, top);
+    ctx.lineTo(cx + halfW + 1.5, bottom);
+    ctx.lineTo(cx - halfW - 1.5, bottom);
+    ctx.closePath();
     ctx.fill();
-
-    ctx.fillStyle = '#8B6914';
-    ctx.fillRect(x + 38, y + 80, 16, 28);
-    ctx.fillStyle = '#9B7924';
-    ctx.fillRect(x + 40, y + 83, 12, 22);
-    ctx.fillStyle = '#7B5904';
-    for (let f = 0; f < 4; f++) {
-      ctx.fillRect(x + 52, y + 82 + f * 6, 12, 3);
+    ctx.strokeStyle = 'rgba(255,220,160,0.16)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(cx - halfW * 0.35, top + 4);
+    ctx.lineTo(cx - halfW * 0.5, bottom - 4);
+    ctx.stroke();
+    for (const by of bands || []) {
+      ctx.fillStyle = '#8a6a1a';
+      ctx.fillRect(cx - halfW - 1, by, halfW * 2 + 2, 5);
+      ctx.fillStyle = '#e8c445';
+      ctx.fillRect(cx - halfW - 0.5, by + 1, halfW * 2 + 1, 1.8);
     }
-    ctx.fillStyle = '#8B6914';
-    ctx.fillRect(x + 62, y + 80, 8, 18);
   }
 
+  // Agni: a twin-throated bronze fire-lance built like a temple horn. Flared
+  // muzzles, a caged ember chamber that breathes between shots, and a
+  // cloth-bound stock.
+  drawAgni(ctx, x, y, gs) {
+    const cx = x + 52;
+    const t = gs.time || 0;
+    const heat = 0.45 + Math.sin(t * 2.4) * 0.18 + (gs.fireAnim || 0) * 0.5;
+
+    this.drawHaft(ctx, cx, y + 74, y + 200, 9, [y + 132, y + 168]);
+    ctx.save();
+    ctx.translate(0, -18);
+
+    // --- Breech block: dark bronze casting under the barrels
+    const breech = ctx.createLinearGradient(cx - 34, 0, cx + 34, 0);
+    breech.addColorStop(0, '#2b1608');
+    breech.addColorStop(0.3, '#7a4a1c');
+    breech.addColorStop(0.5, '#95602a');
+    breech.addColorStop(0.72, '#6b3f18');
+    breech.addColorStop(1, '#221206');
+    ctx.fillStyle = breech;
+    ctx.beginPath();
+    ctx.moveTo(cx - 30, y + 56);
+    ctx.lineTo(cx + 30, y + 56);
+    ctx.lineTo(cx + 25, y + 100);
+    ctx.lineTo(cx - 25, y + 100);
+    ctx.closePath();
+    ctx.fill();
+
+    // Ember chamber: a grilled window with fire behind it
+    const emberX = cx;
+    const emberY = y + 76;
+    const eg = ctx.createRadialGradient(emberX, emberY + 4, 1, emberX, emberY, 20);
+    eg.addColorStop(0, `rgba(255,240,190,${Math.min(1, heat)})`);
+    eg.addColorStop(0.4, `rgba(255,140,30,${heat * 0.9})`);
+    eg.addColorStop(1, 'rgba(120,20,0,0)');
+    ctx.fillStyle = eg;
+    ctx.beginPath();
+    ctx.ellipse(emberX, emberY, 20, 15, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#3a2008';
+    ctx.lineWidth = 2.4;
+    for (let i = -2; i <= 2; i++) {
+      ctx.beginPath();
+      ctx.moveTo(emberX + i * 7, emberY - 13);
+      ctx.lineTo(emberX + i * 7, emberY + 13);
+      ctx.stroke();
+    }
+    // Gold rim around the chamber
+    ctx.strokeStyle = '#d8ab3c';
+    ctx.lineWidth = 2.6;
+    ctx.beginPath();
+    ctx.ellipse(emberX, emberY, 21, 16, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // --- Twin barrels, flaring into horn mouths
+    for (const side of [-1, 1]) {
+      const bx = cx + side * 17;
+      const bg = ctx.createLinearGradient(bx - 13, 0, bx + 13, 0);
+      bg.addColorStop(0, '#20130a');
+      bg.addColorStop(0.28, '#7d4d1e');
+      bg.addColorStop(0.48, '#a86c30');
+      bg.addColorStop(0.7, '#6a3d16');
+      bg.addColorStop(1, '#180d05');
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      ctx.moveTo(bx - 13, y + 8);
+      ctx.lineTo(bx + 13, y + 8);
+      ctx.lineTo(bx + 9, y + 60);
+      ctx.lineTo(bx - 9, y + 60);
+      ctx.closePath();
+      ctx.fill();
+      // Flare lip
+      ctx.fillStyle = '#c8912f';
+      ctx.beginPath();
+      ctx.moveTo(bx - 15, y + 4);
+      ctx.lineTo(bx + 15, y + 4);
+      ctx.lineTo(bx + 12.5, y + 13);
+      ctx.lineTo(bx - 12.5, y + 13);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#f2d179';
+      ctx.fillRect(bx - 15, y + 4, 30, 2.2);
+      // Bore, glowing hotter after a shot
+      ctx.fillStyle = '#0a0503';
+      ctx.beginPath();
+      ctx.ellipse(bx, y + 8, 11, 4.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      const bore = ctx.createRadialGradient(bx, y + 8, 0, bx, y + 8, 11);
+      bore.addColorStop(0, `rgba(255,190,90,${heat * 0.75})`);
+      bore.addColorStop(1, 'rgba(255,60,0,0)');
+      ctx.fillStyle = bore;
+      ctx.beginPath();
+      ctx.ellipse(bx, y + 8, 11, 4.2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Reinforcing rings
+      for (let i = 0; i < 3; i++) {
+        const ry = y + 20 + i * 14;
+        ctx.fillStyle = '#7a5a18';
+        ctx.fillRect(bx - 13 + i * 0.6, ry, 26 - i * 1.2, 4);
+        ctx.fillStyle = '#e0b849';
+        ctx.fillRect(bx - 13 + i * 0.6, ry + 0.8, 26 - i * 1.2, 1.4);
+      }
+    }
+
+    // --- Red prayer cloth knotted round the breech, tail drifting
+    const sway = Math.sin(t * 2.1) * 5;
+    ctx.fillStyle = '#a31414';
+    ctx.beginPath();
+    ctx.moveTo(cx - 28, y + 96);
+    ctx.quadraticCurveTo(cx - 34 + sway, y + 122, cx - 22 + sway * 1.4, y + 146);
+    ctx.lineTo(cx - 13 + sway, y + 141);
+    ctx.quadraticCurveTo(cx - 22, y + 118, cx - 17, y + 96);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.28)';
+    ctx.beginPath();
+    ctx.moveTo(cx - 22, y + 100);
+    ctx.quadraticCurveTo(cx - 27 + sway, y + 122, cx - 20 + sway * 1.3, y + 142);
+    ctx.lineTo(cx - 16 + sway, y + 140);
+    ctx.quadraticCurveTo(cx - 22, y + 120, cx - 18, y + 100);
+    ctx.closePath();
+    ctx.fill();
+
+    // --- Muzzle blast
+    if (gs.fireAnim > 0) {
+      const k = gs.fireAnim;
+      for (const side of [-1, 1]) {
+        const bx = cx + side * 17;
+        const g = ctx.createRadialGradient(bx, y + 6, 0, bx, y + 6, 34 * k);
+        g.addColorStop(0, `rgba(255,255,230,${k})`);
+        g.addColorStop(0.35, `rgba(255,150,30,${k * 0.85})`);
+        g.addColorStop(1, 'rgba(180,40,0,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath();
+        ctx.arc(bx, y + 6, 34 * k, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  // Sudarshana Chakra: the disc is the weapon. A gold yoke cradles a spinning
+  // serrated wheel with a white-hot hub; the launcher itself stays minimal so
+  // the wheel reads at a glance.
   drawChakra(ctx, x, y, gs) {
-    const cx = x + 58;
-    const spin = gs.time * 5;
+    const cx = x + 52;
+    const t = gs.time || 0;
+    const spin = t * 4.5;
+    const discY = y + 30;
 
-    const bodyGrad = ctx.createLinearGradient(x + 22, y + 45, x + 95, y + 45);
-    bodyGrad.addColorStop(0, '#8B6B00');
-    bodyGrad.addColorStop(0.3, '#C8A000');
-    bodyGrad.addColorStop(0.5, '#E8C830');
-    bodyGrad.addColorStop(0.7, '#C8A000');
-    bodyGrad.addColorStop(1, '#8B6B00');
-    ctx.fillStyle = bodyGrad;
-    ctx.fillRect(x + 22, y + 45, 72, 30);
+    this.drawHaft(ctx, cx, y + 68, y + 200, 9, [y + 126, y + 162]);
+    ctx.save();
+    ctx.translate(0, -18);
 
-    ctx.fillStyle = '#aa8800';
-    ctx.fillRect(x + 30, y + 38, 56, 10);
-    ctx.fillStyle = '#776600';
-    ctx.fillRect(x + 32, y + 40, 52, 2);
-    ctx.fillRect(x + 32, y + 44, 52, 2);
+    // --- Cradle: two curved gold arms rising to hold the disc's axle
+    for (const side of [-1, 1]) {
+      const ag = ctx.createLinearGradient(cx + side * 12, y + 50, cx + side * 34, y + 50);
+      ag.addColorStop(0, '#7a5a12');
+      ag.addColorStop(0.45, '#e6c159');
+      ag.addColorStop(1, '#6b4d0e');
+      ctx.strokeStyle = ag;
+      ctx.lineWidth = 9;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx + side * 6, y + 92);
+      ctx.quadraticCurveTo(cx + side * 34, y + 74, cx + side * 30, discY + 6);
+      ctx.stroke();
+      ctx.strokeStyle = 'rgba(60,40,4,0.55)';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+      // Bearing cap where the arm meets the axle
+      ctx.fillStyle = '#f0cf72';
+      ctx.beginPath();
+      ctx.arc(cx + side * 29, discY + 4, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#6b4d0e';
+      ctx.beginPath();
+      ctx.arc(cx + side * 29, discY + 4, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
-    ctx.fillStyle = '#ddbb30';
-    ctx.fillRect(x + 24, y + 50, 3, 20);
-    ctx.fillRect(x + 91, y + 50, 3, 20);
+    // --- Housing block at the base of the cradle
+    const hg = ctx.createLinearGradient(cx - 26, 0, cx + 26, 0);
+    hg.addColorStop(0, '#3a2a06');
+    hg.addColorStop(0.4, '#b8912e');
+    hg.addColorStop(0.6, '#8a6a18');
+    hg.addColorStop(1, '#2e2105');
+    ctx.fillStyle = hg;
+    ctx.beginPath();
+    ctx.moveTo(cx - 24, y + 84);
+    ctx.lineTo(cx + 24, y + 84);
+    ctx.lineTo(cx + 19, y + 108);
+    ctx.lineTo(cx - 19, y + 108);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,240,180,0.25)';
+    ctx.fillRect(cx - 22, y + 86, 44, 2);
+
+    // --- The disc: outer sawtooth ring, spoked hub, blazing core
+    const glow = 0.55 + Math.sin(t * 5) * 0.14 + (gs.fireAnim || 0) * 0.4;
+    const halo = ctx.createRadialGradient(cx, discY, 6, cx, discY, 52);
+    halo.addColorStop(0, `rgba(255,235,140,${glow * 0.55})`);
+    halo.addColorStop(1, 'rgba(255,170,20,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(cx, discY, 52, 0, Math.PI * 2);
+    ctx.fill();
 
     ctx.save();
-    ctx.translate(cx, y + 22);
+    ctx.translate(cx, discY);
     ctx.rotate(spin);
 
-    ctx.strokeStyle = '#ffdd00';
-    ctx.lineWidth = 2;
+    // Sawtooth rim
+    const rim = ctx.createLinearGradient(-32, -32, 32, 32);
+    rim.addColorStop(0, '#8a6410');
+    rim.addColorStop(0.4, '#ffe089');
+    rim.addColorStop(0.62, '#d2a333');
+    rim.addColorStop(1, '#7a570c');
+    ctx.fillStyle = rim;
     ctx.beginPath();
-    for (let i = 0; i < 24; i++) {
-      const a = (i / 24) * Math.PI * 2;
-      const r = i % 2 === 0 ? 22 : 18;
-      if (i === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
-      else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    for (let i = 0; i < 32; i++) {
+      const a = (i / 32) * Math.PI * 2;
+      const r = i % 2 === 0 ? 32 : 25;
+      const px = Math.cos(a) * r;
+      const py = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
     }
     ctx.closePath();
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(255,220,50,0.15)';
     ctx.fill();
-
-    ctx.strokeStyle = '#ffcc00';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(0, 0, 12, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(70,45,4,0.8)';
+    ctx.lineWidth = 1.4;
     ctx.stroke();
 
-    ctx.strokeStyle = '#ffbb00';
-    ctx.lineWidth = 2;
+    // Inner ring and spokes
+    ctx.strokeStyle = '#f2d071';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, 16, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 2.6;
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * 7, Math.sin(a) * 7);
+      ctx.lineTo(Math.cos(a) * 24, Math.sin(a) * 24);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Hub: counter-rotating so the wheel reads as two layers
+    ctx.save();
+    ctx.translate(cx, discY);
+    ctx.rotate(-spin * 0.6);
+    ctx.fillStyle = `rgba(255,250,215,${0.75 + glow * 0.25})`;
+    ctx.beginPath();
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * 5, Math.sin(a) * 5);
-      ctx.lineTo(Math.cos(a) * 12, Math.sin(a) * 12);
-      ctx.stroke();
+      const r = i % 2 === 0 ? 9 : 4.5;
+      const px = Math.cos(a) * r;
+      const py = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
     }
-
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(0, 0, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,200,0.5)';
-    ctx.beginPath();
-    ctx.arc(0, 0, 7, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.restore();
-
-    const glowPulse = Math.sin(gs.time * 6) * 0.1 + 0.2;
-    ctx.fillStyle = `rgba(255,220,50,${glowPulse})`;
-    ctx.beginPath();
-    ctx.arc(cx, y + 22, 26, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = '#8B6914';
-    ctx.fillRect(x + 35, y + 75, 16, 28);
-    ctx.fillStyle = '#9B7924';
-    ctx.fillRect(x + 37, y + 78, 12, 22);
-    ctx.fillStyle = '#7B5904';
-    for (let f = 0; f < 4; f++) {
-      ctx.fillRect(x + 49, y + 77 + f * 6, 14, 3);
-    }
-    ctx.fillStyle = '#8B6914';
-    ctx.fillRect(x + 61, y + 75, 8, 18);
-  }
-
-  drawBrahmastra(ctx, x, y, gs) {
-    const cx = x + 60;
-    const pulse = Math.sin(gs.time * 4) * 0.3 + 0.7;
-
-    const bodyGrad = ctx.createLinearGradient(x + 10, y + 38, x + 110, y + 38);
-    bodyGrad.addColorStop(0, '#330055');
-    bodyGrad.addColorStop(0.2, '#550077');
-    bodyGrad.addColorStop(0.5, '#660088');
-    bodyGrad.addColorStop(0.8, '#550077');
-    bodyGrad.addColorStop(1, '#330055');
-    ctx.fillStyle = bodyGrad;
-    ctx.fillRect(x + 12, y + 38, 96, 38);
-
-    ctx.fillStyle = '#c8a000';
-    ctx.fillRect(x + 14, y + 40, 92, 2);
-    ctx.fillRect(x + 14, y + 73, 92, 2);
-    ctx.fillRect(x + 14, y + 56, 92, 1);
-
-    for (let v = 0; v < 3; v++) {
-      ctx.fillStyle = `rgba(200,0,255,${pulse * 0.3})`;
-      ctx.fillRect(x + 14, y + 45 + v * 9, 6, 4);
-      ctx.fillRect(x + 100, y + 45 + v * 9, 6, 4);
-    }
-
-    const barrelGrad = ctx.createLinearGradient(x + 30, y + 12, x + 90, y + 12);
-    barrelGrad.addColorStop(0, '#440066');
-    barrelGrad.addColorStop(0.5, '#770099');
-    barrelGrad.addColorStop(1, '#440066');
-    ctx.fillStyle = barrelGrad;
-    ctx.fillRect(x + 32, y + 15, 56, 28);
-
-    ctx.fillStyle = '#550077';
-    ctx.beginPath();
-    ctx.moveTo(x + 28, y + 12);
-    ctx.lineTo(x + 92, y + 12);
-    ctx.lineTo(x + 88, y + 18);
-    ctx.lineTo(x + 32, y + 18);
     ctx.closePath();
     ctx.fill();
+    ctx.restore();
 
-    ctx.fillStyle = '#110022';
-    ctx.fillRect(x + 38, y + 12, 44, 5);
-
-    ctx.fillStyle = `rgba(150,0,255,${pulse * 0.4})`;
+    // Red cord wound round the housing
+    const sway = Math.sin(t * 2) * 4;
+    ctx.fillStyle = '#a31414';
     ctx.beginPath();
-    ctx.arc(cx, y + 35, 28, 0, Math.PI * 2);
+    ctx.moveTo(cx + 20, y + 104);
+    ctx.quadraticCurveTo(cx + 30 + sway, y + 126, cx + 22 + sway * 1.4, y + 150);
+    ctx.lineTo(cx + 13 + sway, y + 146);
+    ctx.quadraticCurveTo(cx + 21, y + 124, cx + 11, y + 104);
+    ctx.closePath();
     ctx.fill();
+    ctx.restore();
+  }
 
-    ctx.fillStyle = `rgba(200,50,255,${pulse * 0.6})`;
-    ctx.beginPath();
-    ctx.arc(cx, y + 35, 18, 0, Math.PI * 2);
-    ctx.fill();
+  // Brahmastra: a black-iron reliquary caging a captive star. Gold vedic bands,
+  // a violet core that strains against its cage, and arcs crawling the cage.
+  drawBrahmastra(ctx, x, y, gs) {
+    const cx = x + 52;
+    const t = gs.time || 0;
+    const pulse = 0.6 + Math.sin(t * 3.4) * 0.25 + (gs.fireAnim || 0) * 0.5;
+    const coreY = y + 40;
 
-    ctx.fillStyle = `rgba(255,150,255,${pulse * 0.8})`;
-    ctx.beginPath();
-    ctx.arc(cx, y + 35, 10, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = `rgba(255,220,255,${pulse})`;
-    ctx.beginPath();
-    ctx.arc(cx, y + 35, 5, 0, Math.PI * 2);
-    ctx.fill();
-
+    this.drawHaft(ctx, cx, y + 78, y + 200, 10, [y + 134, y + 170]);
     ctx.save();
-    ctx.translate(cx, y + 35);
-    ctx.rotate(gs.time * 3);
-    ctx.strokeStyle = `rgba(200,100,255,${pulse * 0.5})`;
-    ctx.lineWidth = 2;
-    for (let i = 0; i < 6; i++) {
-      const a = (i / 6) * Math.PI * 2;
+    ctx.translate(0, -18);
+
+    // --- Iron body
+    const body = ctx.createLinearGradient(cx - 32, 0, cx + 32, 0);
+    body.addColorStop(0, '#0d0a16');
+    body.addColorStop(0.32, '#2e2740');
+    body.addColorStop(0.5, '#3d3454');
+    body.addColorStop(0.72, '#241d34');
+    body.addColorStop(1, '#0a0712');
+    ctx.fillStyle = body;
+    ctx.beginPath();
+    ctx.moveTo(cx - 30, y + 62);
+    ctx.quadraticCurveTo(cx, y + 54, cx + 30, y + 62);
+    ctx.lineTo(cx + 24, y + 106);
+    ctx.lineTo(cx - 24, y + 106);
+    ctx.closePath();
+    ctx.fill();
+    // Gold bands with a row of seed-syllable notches
+    for (const by of [y + 68, y + 96]) {
+      ctx.fillStyle = '#8a6a1a';
+      ctx.fillRect(cx - 28, by, 56, 6);
+      ctx.fillStyle = '#e8c445';
+      ctx.fillRect(cx - 28, by + 1, 56, 2);
+    }
+    ctx.fillStyle = `rgba(190,110,255,${pulse * 0.8})`;
+    for (let i = -3; i <= 3; i++) {
+      ctx.fillRect(cx + i * 7 - 1.5, y + 80, 3, 8);
+    }
+
+    // --- Cage: four ribs curving up around the core
+    const halo = ctx.createRadialGradient(cx, coreY, 4, cx, coreY, 54);
+    halo.addColorStop(0, `rgba(220,140,255,${pulse * 0.55})`);
+    halo.addColorStop(0.5, `rgba(150,40,240,${pulse * 0.25})`);
+    halo.addColorStop(1, 'rgba(90,0,180,0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(cx, coreY, 54, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Core: layered violet star
+    const core = ctx.createRadialGradient(cx, coreY, 0, cx, coreY, 24);
+    core.addColorStop(0, `rgba(255,255,255,${pulse})`);
+    core.addColorStop(0.28, `rgba(240,180,255,${pulse * 0.95})`);
+    core.addColorStop(0.62, `rgba(170,50,240,${pulse * 0.8})`);
+    core.addColorStop(1, 'rgba(70,0,140,0)');
+    ctx.fillStyle = core;
+    ctx.beginPath();
+    ctx.arc(cx, coreY, 24, 0, Math.PI * 2);
+    ctx.fill();
+    // Star flare
+    ctx.save();
+    ctx.translate(cx, coreY);
+    ctx.rotate(t * 1.6);
+    ctx.fillStyle = `rgba(255,235,255,${pulse * 0.9})`;
+    ctx.beginPath();
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2;
+      const r = i % 2 === 0 ? 19 : 6;
+      const px = Math.cos(a) * r;
+      const py = Math.sin(a) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    // Cage ribs in front of the core
+    for (const side of [-1, 1]) {
+      for (const spread of [0.55, 1]) {
+        const rg = ctx.createLinearGradient(cx, y + 10, cx, y + 66);
+        rg.addColorStop(0, '#c8952f');
+        rg.addColorStop(0.5, '#6d5312');
+        rg.addColorStop(1, '#d8ab3c');
+        ctx.strokeStyle = rg;
+        ctx.lineWidth = spread === 1 ? 5 : 3.4;
+        ctx.beginPath();
+        ctx.moveTo(cx + side * 5, y + 64);
+        ctx.quadraticCurveTo(cx + side * 34 * spread, coreY, cx + side * 9 * spread, y + 12);
+        ctx.stroke();
+      }
+    }
+    // Cap ring holding the ribs together
+    ctx.strokeStyle = '#e8c445';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.ellipse(cx, y + 12, 13, 4.5, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Arcs crawling between the ribs
+    ctx.strokeStyle = `rgba(220,160,255,${pulse * 0.75})`;
+    ctx.lineWidth = 1.6;
+    for (let i = 0; i < 4; i++) {
+      const seed = t * 9 + i * 2.7;
+      let px = cx + Math.sin(seed) * 22;
+      let py = coreY - 16 + ((i * 9) % 30);
       ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * 10, Math.sin(a) * 10);
-      ctx.lineTo(Math.cos(a + 0.3) * 22, Math.sin(a + 0.3) * 22);
+      ctx.moveTo(px, py);
+      for (let s = 0; s < 3; s++) {
+        px += Math.sin(seed * 1.7 + s * 2.3) * 9;
+        py += 5;
+        ctx.lineTo(px, py);
+      }
       ctx.stroke();
     }
     ctx.restore();
-
-    ctx.fillStyle = `rgba(200,150,255,${0.2 + pulse * 0.15})`;
-    for (let r = 0; r < 4; r++) {
-      ctx.fillRect(x + 22 + r * 22, y + 62, 12, 3);
-    }
-
-    ctx.fillStyle = '#8B6914';
-    ctx.fillRect(x + 25, y + 76, 16, 28);
-    ctx.fillStyle = '#9B7924';
-    ctx.fillRect(x + 27, y + 79, 12, 22);
-    ctx.fillStyle = '#7B5904';
-    for (let f = 0; f < 4; f++) {
-      ctx.fillRect(x + 39, y + 78 + f * 6, 10, 3);
-    }
-    ctx.fillStyle = '#8B6914';
-    ctx.fillRect(x + 72, y + 76, 16, 28);
-    ctx.fillStyle = '#9B7924';
-    ctx.fillRect(x + 74, y + 79, 12, 22);
-    ctx.fillStyle = '#7B5904';
-    for (let f = 0; f < 4; f++) {
-      ctx.fillRect(x + 66, y + 78 + f * 6, 8, 3);
-    }
   }
 
   renderHUD(ctx, player, gameState, w, h) {

@@ -9,11 +9,19 @@ import {
 } from './constants.js';
 import { createTextures } from './textures.js';
 import { createSpriteFrames } from './sprites3d.js';
+import { createMonster } from './models3d.js';
 
 const TORCH_LIGHT_POOL = 6;
 const MAX_PARTICLES = 512;
 
 const ENEMY_TYPES = new Set(['asura', 'naga', 'rakshasa']);
+
+// World height in tiles for each monster. WALL_HEIGHT is 1.4, so even
+// Mahishasura clears the temple ceiling.
+const ENEMY_HEIGHT = { asura: 1.02, naga: 1.06, rakshasa: 1.18, boss: 1.34 };
+
+// Stride rate per monster, so the walk cycle matches how fast they close.
+const ENEMY_GAIT = { asura: 8.5, naga: 5.0, rakshasa: 5.5 };
 
 // Faint self-lit tint so doors read as interactive against plain stone.
 // Keyed by tile id: 5 wood, 6 red key, 7 blue key, 8 gold key.
@@ -85,8 +93,8 @@ export class Renderer3D {
   projectSpriteTop(sprite, w, h) {
     const mesh = this._spriteMeshes && this._spriteMeshes.get(sprite);
     if (!mesh) return null;
-    const size = mesh.userData.size || 1;
-    const v = this._projVec.set(mesh.position.x, mesh.position.y + size * 0.6, mesh.position.z);
+    const top = mesh.userData.top || (mesh.userData.size || 1) * 0.6;
+    const v = this._projVec.set(mesh.position.x, mesh.position.y + top, mesh.position.z);
     v.project(this.camera);
     if (v.z > 1 || Math.abs(v.x) > 1.2 || Math.abs(v.y) > 1.5) return null;
     return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h };
@@ -332,22 +340,32 @@ export class Renderer3D {
   _clearSprites() {
     for (const child of [...this.spriteGroup.children]) {
       this.spriteGroup.remove(child);
+      if (child.userData.model) child.userData.model.dispose();
     }
     this._spriteMeshes = new Map(); // game sprite object -> mesh
   }
 
+  // Enemies are real rigged geometry (src/models3d.js), not billboards: the
+  // returned root stands with its feet on the floor and is posed each frame.
   _enemyMesh(sprite) {
-    const size = sprite.boss ? 1.35 : 1.0;
-    const geo = new THREE.PlaneGeometry(size, size);
-    const mat = new THREE.MeshLambertMaterial({
-      map: this.frames.enemies[sprite.boss ? 'boss' : sprite.type].idle[0],
-      transparent: true,
-      alphaTest: 0.06,
-      side: THREE.DoubleSide,
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.userData.size = size;
-    return mesh;
+    const height = sprite.boss ? ENEMY_HEIGHT.boss : ENEMY_HEIGHT[sprite.type];
+    const model = createMonster(sprite.type, sprite.boss, height);
+    const root = model.root;
+    root.userData.model = model;
+    root.userData.size = height;
+    root.userData.top = height * 1.02;
+    root.userData.walk = Math.random() * 10;
+    root.userData.moving = 0;
+    root.userData.yaw = null;
+    if (sprite.boss) {
+      // Mahishasura carries his own hellfire, so the arena lights up around him
+      const l = new THREE.PointLight(0xff4a12, 6, 7, 2);
+      // Local space: the root is scaled down from authoring units to tiles.
+      l.position.set(0, (height * 0.75) / root.scale.y, 0);
+      root.add(l);
+      root.userData.bossLight = l;
+    }
+    return root;
   }
 
   _pickupSprite(sprite) {
@@ -371,7 +389,7 @@ export class Renderer3D {
     return new THREE.Mesh(geo, mat);
   }
 
-  _updateSprites(sprites, gameState, camX, camZ) {
+  _updateSprites(sprites, gameState, camX, camZ, dt) {
     const time = gameState.time;
     let idx = 0;
     for (const sprite of sprites) {
@@ -381,6 +399,7 @@ export class Renderer3D {
       if (!visible) {
         if (mesh) {
           this.spriteGroup.remove(mesh);
+          if (mesh.userData.model) mesh.userData.model.dispose();
           this._spriteMeshes.delete(sprite);
         }
         continue;
@@ -397,31 +416,63 @@ export class Renderer3D {
       const sz = sprite.y * WORLD_SCALE;
 
       if (ENEMY_TYPES.has(sprite.type)) {
-        const frames = this.frames.enemies[sprite.boss ? 'boss' : sprite.type];
-        let tex;
-        let opacity = 1;
-        let yOff = 0;
-        if (sprite.state === 'dying') {
-          const t = sprite.deathT || 0;
-          tex = frames.dead[t < 0.45 ? 0 : 1];
-          opacity = 1 - Math.max(0, (t - 0.55) / 0.45);
-        } else if (sprite.windupTimer > 0) {
-          tex = frames.windup[0];
-        } else if (sprite.state === 'chase') {
-          tex = frames.walk[Math.floor(time * 5 + idx) % 2];
-        } else {
-          tex = frames.idle[Math.floor(time * 1.6 + idx) % 2];
-          yOff = Math.sin(time * 1.5 + idx) * 0.008;
+        const ud = mesh.userData;
+        const model = ud.model;
+
+        // Feet stay on the floor; the poser owns Y (it sinks the corpse).
+        mesh.position.x = sx;
+        mesh.position.z = sz;
+
+        const dying = sprite.state === 'dying';
+        const dead = dying ? Math.min(1, (sprite.deathT || 0) / 0.55) : 0;
+
+        // How hard the monster is actually travelling this frame, smoothed so
+        // the gait eases in and out instead of popping.
+        const moved = ud.px === undefined
+          ? 0
+          : Math.hypot(sx - ud.px, sz - ud.pz) / Math.max(dt, 1e-4);
+        ud.px = sx;
+        ud.pz = sz;
+        const wantMove = dying ? 0 : Math.min(1, moved / 0.7);
+        ud.moving += (wantMove - ud.moving) * Math.min(1, dt * 9);
+
+        const gait = ENEMY_GAIT[sprite.type] || 6;
+        ud.walk += dt * gait * (0.35 + ud.moving * 0.9);
+
+        // Rear-back ramps up across the wind-up, releasing on the strike.
+        const windup = sprite.windupTimer > 0 && !dying
+          ? Math.min(1, (1 - sprite.windupTimer / (sprite.windupMax || 0.3)) * 1.7)
+          : 0;
+
+        model.pose({
+          t: time + idx,
+          walk: ud.walk,
+          moving: ud.moving,
+          windup,
+          dead,
+        });
+
+        // Facing: turn toward the player once awake, hold the spawn angle
+        // while idle, freeze on death.
+        if (!dying) {
+          if (sprite.state === 'idle') {
+            if (ud.yaw === null) ud.yaw = ((sprite.x * 7 + sprite.y * 13) % 628) / 100;
+          } else {
+            const want = Math.atan2(camX - sx, camZ - sz);
+            if (ud.yaw === null) ud.yaw = want;
+            let d = want - ud.yaw;
+            while (d > Math.PI) d -= Math.PI * 2;
+            while (d < -Math.PI) d += Math.PI * 2;
+            ud.yaw += d * Math.min(1, dt * 7);
+          }
+          mesh.rotation.y = ud.yaw;
         }
-        if (mesh.material.map !== tex) {
-          mesh.material.map = tex;
-          mesh.material.needsUpdate = true;
+
+        model.setHurt(sprite.hurtTimer > 0 ? Math.min(1, sprite.hurtTimer / 0.25) : 0);
+        model.setFade(dying ? 1 - Math.max(0, ((sprite.deathT || 0) - 0.6) / 0.4) : 1);
+        if (ud.bossLight) {
+          ud.bossLight.intensity = (1 - dead) * (5 + Math.sin(time * 9) * 1.2 + windup * 6);
         }
-        mesh.material.opacity = opacity;
-        mesh.material.color.setRGB(1, sprite.hurt ? 0.35 : 1, sprite.hurt ? 0.35 : 1);
-        const size = mesh.userData.size;
-        mesh.position.set(sx, size / 2 + yOff, sz);
-        mesh.rotation.y = Math.atan2(camX - sx, camZ - sz);
       } else if (sprite.type === 'pillar') {
         mesh.position.set(sx, WALL_HEIGHT / 2, sz);
         mesh.rotation.y = Math.atan2(camX - sx, camZ - sz);
@@ -635,7 +686,7 @@ export class Renderer3D {
     }
 
     this._updateTorches(time, dt, camX, camZ);
-    this._updateSprites(sprites, gameState, camX, camZ);
+    this._updateSprites(sprites, gameState, camX, camZ, dt);
     this._updateProjectiles(projectiles, enemyProjectiles, time);
     this._updateParticles(gameState.particles);
 
