@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>VIDHI - level maps</title>
+  <style>html, body { margin: 0; background: #000; } canvas { display: block; }</style>
+  <script type="importmap">
+    { "imports": { "three": "../lib/three.module.min.js" } }
+  </script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script type="module">
+import { LEVELS } from '../src/maps.js';
+
+// Offline top-down level diagrams for the README, drawn from the same grid
+// data the game loads, so they can never drift out of sync with the maps.
+const CHAR_TILES = { '.': 0, '#': 1, R: 2, D: 3, G: 4, '+': 5, r: 6, b: 7, g: 8, S: 9 };
+const WALL_FILL = {
+  1: '#54483a', 2: '#6d3226', 3: '#2f2b34', 4: '#7a6127',
+};
+const DOOR_FILL = { 5: '#8a5a20', 6: '#b02840', 7: '#3060c0', 8: '#d8a828', 9: '#5b4f41' };
+const ENEMY_FILL = { asura: '#ff6a2a', naga: '#a8e030', rakshasa: '#b070ff' };
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function marker(x, y, r, fill, stroke) {
+  ctx.fillStyle = fill;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  if (stroke) {
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+  }
+}
+
+window.drawLevel = (index, opts = {}) => {
+  const level = LEVELS[index];
+  const grid = level.grid;
+  const h = grid.length;
+  const w = grid[0].length;
+  const cell = opts.cell || 26;
+  const pad = 18;
+  const header = 52;
+  const legend = 74;
+  const W = w * cell + pad * 2;
+  const H = h * cell + pad * 2 + header + legend;
+  canvas.width = W;
+  canvas.height = H;
+
+  ctx.fillStyle = '#0a0807';
+  ctx.fillRect(0, 0, W, H);
+
+  // Title
+  ctx.fillStyle = '#e8c063';
+  ctx.font = 'bold 22px ui-monospace, "SF Mono", Menlo, monospace';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(`NILAI ${index + 1}  ·  ${level.name}`, pad, header / 2 + 6);
+  ctx.fillStyle = '#7a6a58';
+  ctx.font = '14px ui-monospace, Menlo, monospace';
+  if (opts.subtitle) ctx.fillText(opts.subtitle, pad + 330, header / 2 + 7);
+
+  const ox = pad;
+  const oy = header + pad;
+  const px = (gx) => ox + gx * cell;
+  const py = (gy) => oy + gy * cell;
+
+  // Floor bed
+  ctx.fillStyle = '#14100c';
+  ctx.fillRect(ox, oy, w * cell, h * cell);
+
+  // Tiles
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const t = CHAR_TILES[grid[y][x]];
+      if (t === 0) continue;
+      if (t === 9) {
+        // Secret wall: painted as stone with a dashed tell
+        ctx.fillStyle = WALL_FILL[1];
+        ctx.fillRect(px(x), py(y), cell, cell);
+        ctx.strokeStyle = '#d8c07a';
+        ctx.setLineDash([3, 3]);
+        ctx.lineWidth = 1.6;
+        ctx.strokeRect(px(x) + 3, py(y) + 3, cell - 6, cell - 6);
+        ctx.setLineDash([]);
+      } else if (t >= 5) {
+        ctx.fillStyle = '#14100c';
+        ctx.fillRect(px(x), py(y), cell, cell);
+        ctx.fillStyle = DOOR_FILL[t];
+        roundRect(px(x) + 2, py(y) + cell * 0.3, cell - 4, cell * 0.4, 2);
+        ctx.fill();
+      } else {
+        ctx.fillStyle = WALL_FILL[t] || WALL_FILL[1];
+        ctx.fillRect(px(x), py(y), cell, cell);
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.fillRect(px(x), py(y) + cell - 2, cell, 2);
+        ctx.fillRect(px(x) + cell - 2, py(y), 2, cell);
+      }
+    }
+  }
+
+  // Grid hairlines over the floor
+  ctx.strokeStyle = 'rgba(255,255,255,0.035)';
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= w; x++) {
+    ctx.beginPath();
+    ctx.moveTo(px(x), oy);
+    ctx.lineTo(px(x), oy + h * cell);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= h; y++) {
+    ctx.beginPath();
+    ctx.moveTo(ox, py(y));
+    ctx.lineTo(ox + w * cell, py(y));
+    ctx.stroke();
+  }
+
+  // Enemies
+  for (const e of level.enemies) {
+    const x = px(e.x);
+    const y = py(e.y);
+    if (e.boss) {
+      ctx.save();
+      ctx.shadowColor = '#ff3010';
+      ctx.shadowBlur = 18;
+      marker(x, y, cell * 0.5, '#ff3a12', '#ffd0a0');
+      ctx.restore();
+      ctx.fillStyle = '#ffe0b0';
+      ctx.font = 'bold 12px ui-monospace, Menlo, monospace';
+      ctx.fillText(e.name, x + cell * 0.7, y);
+    } else {
+      marker(x, y, cell * 0.25, ENEMY_FILL[e.type] || '#fff', 'rgba(0,0,0,0.55)');
+    }
+  }
+
+  // Pickups: only the ones that gate progress get drawn, plus armour
+  for (const p of level.pickups) {
+    const x = px(p.x);
+    const y = py(p.y);
+    if (p.type === 'key') {
+      const col = p.color === 'red' ? '#ff4060' : p.color === 'blue' ? '#5090ff' : '#ffd23c';
+      ctx.save();
+      ctx.shadowColor = col;
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.arc(x, y - cell * 0.18, cell * 0.24, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(x - cell * 0.07, y - cell * 0.05, cell * 0.14, cell * 0.5);
+      ctx.fillRect(x, y + cell * 0.24, cell * 0.24, cell * 0.1);
+      ctx.restore();
+    } else if (p.type === 'armor') {
+      ctx.fillStyle = '#4a80e0';
+      ctx.beginPath();
+      ctx.moveTo(x, y - cell * 0.3);
+      ctx.lineTo(x + cell * 0.26, y - cell * 0.1);
+      ctx.lineTo(x, y + cell * 0.32);
+      ctx.lineTo(x - cell * 0.26, y - cell * 0.1);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // Pillars
+  for (const d of level.decorations || []) {
+    ctx.strokeStyle = 'rgba(220,200,150,0.5)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(px(d.x), py(d.y), cell * 0.28, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Player start
+  const sx = px(level.playerStart.x);
+  const sy = py(level.playerStart.y);
+  ctx.save();
+  ctx.translate(sx, sy);
+  ctx.rotate(level.playerStart.angle);
+  ctx.fillStyle = '#4cff88';
+  ctx.beginPath();
+  ctx.moveTo(cell * 0.5, 0);
+  ctx.lineTo(-cell * 0.32, cell * 0.34);
+  ctx.lineTo(-cell * 0.12, 0);
+  ctx.lineTo(-cell * 0.32, -cell * 0.34);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  // Exit portal
+  if (level.exit) {
+    const ex = px(level.exit.x + 0.5);
+    const ey = py(level.exit.y + 0.5);
+    ctx.save();
+    ctx.shadowColor = '#ffc040';
+    ctx.shadowBlur = 20;
+    ctx.strokeStyle = '#ffcf58';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(ex, ey, cell * 0.46, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#ffcf58';
+    ctx.font = 'bold 11px ui-monospace, Menlo, monospace';
+    ctx.fillText('EXIT', ex + cell * 0.6, ey);
+  }
+
+  // Legend
+  const ly = oy + h * cell + 30;
+  ctx.font = '13px ui-monospace, Menlo, monospace';
+  let lx = pad;
+  const item = (draw, label, width) => {
+    draw(lx + 8, ly);
+    ctx.fillStyle = '#9c8f7a';
+    ctx.fillText(label, lx + 22, ly + 1);
+    lx += width;
+  };
+  item((x, y) => marker(x, y, 5, ENEMY_FILL.asura), 'Asura', 96);
+  item((x, y) => marker(x, y, 5, ENEMY_FILL.naga), 'Naga', 90);
+  item((x, y) => marker(x, y, 5, ENEMY_FILL.rakshasa), 'Rakshasa', 122);
+  item((x, y) => { ctx.fillStyle = '#4cff88'; ctx.fillRect(x - 5, y - 5, 10, 10); }, 'Start', 88);
+  item((x, y) => {
+    ctx.strokeStyle = '#ffcf58'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke();
+  }, 'Exit', 84);
+  item((x, y) => {
+    ctx.strokeStyle = '#d8c07a'; ctx.setLineDash([3, 3]); ctx.lineWidth = 1.6;
+    ctx.strokeRect(x - 6, y - 6, 12, 12); ctx.setLineDash([]);
+  }, 'Secret', 106);
+  item((x, y) => { ctx.fillStyle = DOOR_FILL[6]; ctx.fillRect(x - 6, y - 4, 12, 8); }, 'Locked door', 138);
+  item((x, y) => {
+    ctx.strokeStyle = 'rgba(220,200,150,0.5)'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.stroke();
+  }, 'Pillar', 0);
+
+  return true;
+};
+
+window.ready = true;
+</script>
+</body>
+</html>
