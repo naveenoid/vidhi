@@ -9,7 +9,7 @@ import {
 } from './constants.js';
 import { createTextures } from './textures.js';
 import { createSpriteFrames } from './sprites3d.js';
-import { createMonster } from './models3d.js';
+import { createMonster, preloadSculpts, onSculptsReady } from './monsters.js';
 
 const TORCH_LIGHT_POOL = 6;
 const MAX_PARTICLES = 512;
@@ -42,6 +42,12 @@ export class Renderer3D {
     // lifts the crushed shadows that made the flat-lit look read as "poor".
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.35;
+    // Monsters cast real shadows from a lantern cone. Nothing grounded the
+    // enemies before this: without a shadow they read as pasted onto the
+    // scene rather than standing in it. Only the enemies cast (the level is
+    // excluded), so the extra pass stays cheap - a handful of draws.
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = coarse ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(68, canvas.clientWidth / canvas.clientHeight, 0.05, 60);
@@ -58,6 +64,18 @@ export class Renderer3D {
     this.scene.add(this.hemi);
     this.lantern = new THREE.PointLight(0xffc080, 14, 10, 2);
     this.scene.add(this.lantern);
+    // A spotlight down the player's view carries the shadow map. A point light
+    // would need six cube faces; one cone needs one, and a shadow thrown onto
+    // the wall behind a monster is exactly the shot we want anyway.
+    this.lanternSpot = new THREE.SpotLight(0xffcf9a, 9, 11, 1.05, 0.55, 2);
+    this.lanternSpot.castShadow = true;
+    this.lanternSpot.shadow.mapSize.set(coarse ? 512 : 1024, coarse ? 512 : 1024);
+    this.lanternSpot.shadow.camera.near = 0.1;
+    this.lanternSpot.shadow.camera.far = 12;
+    this.lanternSpot.shadow.bias = -0.0016;
+    this.lanternSpot.shadow.normalBias = 0.02;
+    this.scene.add(this.lanternSpot);
+    this.scene.add(this.lanternSpot.target);
     this.muzzleLight = new THREE.PointLight(0xffaa40, 0, 8, 2);
     this.scene.add(this.muzzleLight);
     this.projLight = new THREE.PointLight(0xffdd60, 0, 6, 2);
@@ -79,12 +97,26 @@ export class Renderer3D {
     this.portalLight = null;
     this.muzzleT = 0;
     this.lightningT = 0;
+    // Shadow casting is the one thing here whose cost varies wildly by GPU.
+    // Rather than guess, watch the frame time and drop shadows if the machine
+    // cannot hold a playable rate with them on.
+    this._frameAvg = 1 / 60;
+    this._slowFrames = 0;
+    this._shadowsDropped = false;
     this.torchOutage = { idx: -1, t: 0 };
 
     this._projVec = new THREE.Vector3();
 
     this._initParticles();
     this._initProjectilePools();
+
+    // If any sculpted models are configured, load them in the background and
+    // rebuild the enemies already on screen once they land. Until then (and
+    // by default, since none ship) every monster is the procedural rig.
+    preloadSculpts();
+    onSculptsReady(() => {
+      this._rebuildEnemies = true;
+    });
   }
 
   // Project a point just above a sprite's head to HUD pixel coords using the
@@ -191,7 +223,9 @@ export class Renderer3D {
       geo.setAttribute('color', new THREE.Float32BufferAttribute(b.col, 3));
       geo.setIndex(b.idx);
       const mat = new THREE.MeshLambertMaterial({ map: this.textures[tile], vertexColors: true });
-      this.levelGroup.add(new THREE.Mesh(geo, mat));
+      const wall = new THREE.Mesh(geo, mat);
+      wall.receiveShadow = true;
+      this.levelGroup.add(wall);
     }
   }
 
@@ -204,6 +238,7 @@ export class Renderer3D {
     floorTex.repeat.set(w, h);
     floorTex.needsUpdate = true;
     const floor = new THREE.Mesh(floorGeo, new THREE.MeshLambertMaterial({ map: floorTex }));
+    floor.receiveShadow = true;
     floor.position.set(w / 2, 0, h / 2);
     this.levelGroup.add(floor);
 
@@ -403,6 +438,13 @@ export class Renderer3D {
           this._spriteMeshes.delete(sprite);
         }
         continue;
+      }
+      if (mesh && this._rebuildEnemies && ENEMY_TYPES.has(sprite.type)) {
+        // A sculpt finished loading: throw away the procedural stand-in.
+        this.spriteGroup.remove(mesh);
+        if (mesh.userData.model) mesh.userData.model.dispose();
+        this._spriteMeshes.delete(sprite);
+        mesh = null;
       }
       if (!mesh) {
         if (ENEMY_TYPES.has(sprite.type)) mesh = this._enemyMesh(sprite);
@@ -636,6 +678,27 @@ export class Renderer3D {
     }
   }
 
+  // Give the machine a couple of seconds to settle, then bail out of shadows
+  // if it is consistently missing 30fps. One-way: re-enabling would just make
+  // it stutter again.
+  _checkShadowBudget(dt) {
+    if (this._shadowsDropped || !this.renderer.shadowMap.enabled) return;
+    if (dt <= 0 || dt > 0.5) return; // ignore load hitches and tab switches
+    this._frameAvg += (dt - this._frameAvg) * 0.05;
+    this._slowFrames = this._frameAvg > 1 / 30 ? this._slowFrames + 1 : 0;
+    if (this._slowFrames > 180) {
+      this._shadowsDropped = true;
+      this.lanternSpot.castShadow = false;
+      this.renderer.shadowMap.enabled = false;
+      // Materials compiled against the shadow path need rebuilding once.
+      this.scene.traverse((o) => {
+        if (o.material) {
+          for (const m of Array.isArray(o.material) ? o.material : [o.material]) m.needsUpdate = true;
+        }
+      });
+    }
+  }
+
   flashMuzzle(weapon) {
     const colors = { trishul: 0x88ccff, agni: 0xff6620, chakra: 0xffdd30, brahmastra: 0xcc40ff };
     this.muzzleLight.color.setHex(colors[weapon] || 0xffaa40);
@@ -666,6 +729,18 @@ export class Renderer3D {
     const lowHealth = player.health < 30 ? 0.85 : 1;
     this.lantern.intensity = (13 + Math.sin(time * 7) * 0.8) * lowHealth;
 
+    // Shadow cone points where the player looks, offset slightly to one side
+    // so shadows fall across the scene instead of hiding directly behind
+    // whatever is casting them.
+    this.lanternSpot.position.set(camX - Math.cos(player.angle + 1.2) * 0.35, EYE_HEIGHT + 0.34, camZ - Math.sin(player.angle + 1.2) * 0.35);
+    this.lanternSpot.target.position.set(
+      camX + Math.cos(player.angle) * 6,
+      EYE_HEIGHT - 0.25,
+      camZ + Math.sin(player.angle) * 6,
+    );
+    this.lanternSpot.target.updateMatrixWorld();
+    this.lanternSpot.intensity = (8.5 + Math.sin(time * 7) * 0.6) * lowHealth;
+
     // Muzzle flash light
     if (this.muzzleT > 0) {
       this.muzzleT -= dt;
@@ -685,8 +760,10 @@ export class Renderer3D {
       }
     }
 
+    this._checkShadowBudget(dt);
     this._updateTorches(time, dt, camX, camZ);
     this._updateSprites(sprites, gameState, camX, camZ, dt);
+    this._rebuildEnemies = false;
     this._updateProjectiles(projectiles, enemyProjectiles, time);
     this._updateParticles(gameState.particles);
 
