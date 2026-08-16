@@ -261,6 +261,15 @@ function bakeCavityAO(geo, amp) {
   const n = pos.count;
   const detail = geo.userData.detail;
   const col = new Float32Array(n * 3);
+  // Undisplaced surfaces (metal, teeth, eyes) have no cavities to bake and
+  // should not be darkened; they still need the attribute because the
+  // materials all declare vertexColors.
+  if (amp === 0) {
+    col.fill(1);
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    delete geo.userData.detail;
+    return geo;
+  }
   for (let i = 0; i < n; i++) {
     const d = detail ? detail[i] : 0;
     // Pits (negative displacement) darken hard; bumps brighten slightly.
@@ -274,7 +283,6 @@ function bakeCavityAO(geo, amp) {
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   delete geo.userData.detail;
-  if (amp === 0) return geo; // keep hard surfaces crisp
   return geo;
 }
 
@@ -757,7 +765,7 @@ function materialProtos(type) {
     // Wet blood: darker than the hide, and glossier than anything else on it.
     blood: rimLit(new THREE.MeshPhongMaterial({
       map: T.blood, bumpMap: T.blood, bumpScale: 0.7,
-      color: 0xa8302a, specular: 0x8a4038, shininess: 100,
+      color: 0x561512, specular: 0x4a231e, shininess: 86,
       vertexColors: true, transparent: true, opacity: 0.95, side: THREE.DoubleSide,
     })),
     eye: new THREE.MeshBasicMaterial({ color: 0xffffff }),
@@ -773,8 +781,17 @@ function materialProtos(type) {
 // creature's edge would otherwise dissolve into the fog; a cold rim separates
 // it from the background and reads as damp skin catching stray light.
 function rimLit(mat, rim) {
-  const color = new THREE.Color(rim || 0x5a6a86);
-  const strength = 0.55;
+  mat.userData.rim = rim || 0x5a6a86;
+  return applyRim(mat);
+}
+
+// Installs the rim patch on a material. Must be re-run after clone(): three's
+// Material.copy() carries neither onBeforeCompile nor customProgramCacheKey,
+// so a cloned material silently renders without the effect. The setting lives
+// in userData, which clone() does preserve.
+export function applyRim(mat) {
+  const color = new THREE.Color(mat.userData.rim);
+  const strength = 0.32;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.rimColor = { value: color };
     shader.uniforms.rimStrength = { value: strength };
@@ -782,10 +799,12 @@ function rimLit(mat, rim) {
       .replace('#include <common>', `#include <common>
         uniform vec3 rimColor;
         uniform float rimStrength;`)
-      .replace('#include <dithering_fragment>', `
+      // After <opaque_fragment> so the rim is still tone-mapped and, more
+      // importantly, still fogged - it must fade with distance like everything
+      // else or it draws an outline around monsters you should not yet see.
+      .replace('#include <opaque_fragment>', `#include <opaque_fragment>
         float rimF = 1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition)));
-        gl_FragColor.rgb += rimColor * pow(rimF, 3.0) * rimStrength;
-        #include <dithering_fragment>`);
+        gl_FragColor.rgb += rimColor * pow(rimF, 3.0) * rimStrength;`);
   };
   // Materials with different shader patches must not share a program.
   mat.customProgramCacheKey = () => `rim${color.getHex()}`;
@@ -902,13 +921,17 @@ function buildAsura(seed = 1) {
   }
   // Horns: heavy ridged pair sweeping up and back over the shoulders
   for (const side of [-1, 1]) {
+    // Horns differ per variant and per side: length, sweep, and the odd
+    // stunted or broken one.
+    const hl = 0.72 + r() * 0.62;
+    const hs = 0.8 + r() * 0.5;
     head.put('horn', tube(
       [
         [side * 4, 7.5, 2],
-        [side * 7.5, 14, -2],
-        [side * 9, 20, -10],
-        [side * 7, 22, -19],
-        [side * 4.5, 20, -25],
+        [side * 7.5, 14, -2 * hs],
+        [side * 9, 12 + 8 * hl, -10 * hs],
+        [side * 7, 13 + 9 * hl, -19 * hs],
+        [side * 4.5, 12 + 8 * hl, -25 * hs],
       ],
       { segs: 22, radial: 14, radius: (t) => 3.1 * (1 - t) ** 0.55 + 0.15, capEnd: false, vScale: 3 },
     ));
@@ -1261,20 +1284,23 @@ function buildRakshasa(boss, seed = 1) {
   }
   // Horns: ram-curled for the rakshasa, a wide buffalo sweep for the boss
   for (const side of [-1, 1]) {
+    // Horn spread and curl vary per variant and per side
+    const hw = 0.82 + r() * 0.42;
+    const hc = 0.78 + r() * 0.5;
     const pts = boss
       ? [
         [side * 7, 8, -1],
-        [side * 18, 12, -3],
-        [side * 29, 13, -5],
-        [side * 37, 18, -2],
-        [side * 36, 27, 6],
+        [side * 18 * hw, 12, -3],
+        [side * 29 * hw, 13, -5 * hc],
+        [side * 37 * hw, 18, -2 * hc],
+        [side * 36 * hw, 20 + 9 * hc, 6 * hc],
       ]
       : [
         [side * 8, 7, -1],
-        [side * 16, 12, -4],
-        [side * 20, 10, -12],
-        [side * 15, 3, -16],
-        [side * 10, 0, -11],
+        [side * 16 * hw, 12, -4 * hc],
+        [side * 20 * hw, 10, -12 * hc],
+        [side * 15 * hw, 3, -16 * hc],
+        [side * 10 * hw, 0, -11 * hc],
       ];
     head.put('horn', tube(pts, {
       segs: 22,
@@ -1497,11 +1523,14 @@ const EYE_COLORS = {
  * @returns a handle with { root, height, pose(state), setHurt(t), setFade(a), dispose() }
  */
 export function createMonster(type, boss, height, variant) {
-  const v = variant === undefined ? (Math.random() * VARIANTS) | 0 : variant % VARIANTS;
+  const explicit = variant !== undefined;
+  const v = explicit ? variant % VARIANTS : (Math.random() * VARIANTS) | 0;
   const rig = rigFor(type, boss, v);
   const protos = materialProtos(type);
   const eyeColor = EYE_COLORS[boss ? 'boss' : type];
-  const rnd = rng(v * 977 + ((Math.random() * 1e6) | 0));
+  // An explicit variant means a reproducible monster, so the offline capture
+  // tool shoots the same creature every run.
+  const rnd = rng(explicit ? v * 977 + 13 : v * 977 + ((Math.random() * 1e6) | 0));
 
   // Per-instance materials so one monster can flash or fade alone. Each also
   // gets its own slight shift in tone and gloss, so a pack does not look like
@@ -1511,6 +1540,8 @@ export function createMonster(type, boss, height, variant) {
   const skinLike = [];
   for (const key of Object.keys(protos)) {
     const m = protos[key].clone();
+    // clone() drops the shader patch; put it back or the rim silently vanishes.
+    if (m.userData && m.userData.rim !== undefined) applyRim(m);
     if (key === 'eye') m.color.setHex(eyeColor);
     else if (key === 'ember') m.color.setHex(boss ? 0xff5a10 : type === 'naga' ? 0xc0ff40 : 0xff5a12);
     else {
@@ -1519,6 +1550,15 @@ export function createMonster(type, boss, height, variant) {
     }
     mats[key] = m;
     if (key !== 'eye' && key !== 'ember') skinLike.push(m);
+  }
+
+  // What each material wants when the monster is not fading, so setFade can
+  // put it back instead of forcing everything opaque.
+  const baseTransparent = {};
+  const baseOpacity = {};
+  for (const key of Object.keys(mats)) {
+    baseTransparent[key] = mats[key].transparent;
+    baseOpacity[key] = mats[key].opacity;
   }
 
   const root = new THREE.Group();
@@ -1620,12 +1660,17 @@ export function createMonster(type, boss, height, variant) {
       if (on !== transparent) {
         transparent = on;
         for (const key of Object.keys(mats)) {
-          mats[key].transparent = on;
-          mats[key].depthWrite = !on;
-          mats[key].needsUpdate = true;
+          const m = mats[key];
+          // Restore each material's own setting rather than forcing opaque:
+          // blood is authored transparent and must stay that way.
+          m.transparent = on || baseTransparent[key];
+          m.depthWrite = !m.transparent;
+          m.needsUpdate = true;
         }
       }
-      if (on) for (const key of Object.keys(mats)) mats[key].opacity = alpha;
+      for (const key of Object.keys(mats)) {
+        mats[key].opacity = on ? alpha : baseOpacity[key];
+      }
       glowMat.opacity = alpha;
     },
 

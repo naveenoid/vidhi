@@ -9,7 +9,7 @@ import {
 } from './constants.js';
 import { createTextures } from './textures.js';
 import { createSpriteFrames } from './sprites3d.js';
-import { createMonster, preloadSculpts, onSculptsReady } from './monsters.js';
+import { createMonster, preloadSculpts, onSculptsReady, hasSculpt } from './monsters.js';
 
 const TORCH_LIGHT_POOL = 6;
 const MAX_PARTICLES = 512;
@@ -439,10 +439,13 @@ export class Renderer3D {
         }
         continue;
       }
-      if (mesh && this._rebuildEnemies && ENEMY_TYPES.has(sprite.type)) {
-        // A sculpt finished loading: throw away the procedural stand-in.
+      if (mesh && this._rebuildEnemies && ENEMY_TYPES.has(sprite.type)
+          && !mesh.userData.model.sculpted && hasSculpt(sprite.type, sprite.boss)) {
+        // A sculpt landed for this species: retire the procedural stand-in.
+        // Anything without one keeps its mesh, so its facing and gait do not
+        // snap back to defaults for no reason.
         this.spriteGroup.remove(mesh);
-        if (mesh.userData.model) mesh.userData.model.dispose();
+        mesh.userData.model.dispose();
         this._spriteMeshes.delete(sprite);
         mesh = null;
       }

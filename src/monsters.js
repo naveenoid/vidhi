@@ -15,10 +15,12 @@ import { createMonster as createProcedural } from './models3d.js';
 import { MONSTER_MODELS, HAS_SCULPTS } from './monsterAssets.js';
 
 const loaded = new Map();   // key -> { scene, clips, cfg }
+// Populated by preloadSculpts before any sculpt can be instanced.
+const skeletonUtils = {};
 let readyCallbacks = [];
 let loadStarted = false;
 
-const keyFor = (type, boss) => (boss && MONSTER_MODELS.boss ? 'boss' : type);
+const keyFor = (type, boss) => (boss && loaded.has('boss') ? 'boss' : type);
 
 /**
  * Kick off loading of any configured sculpts. Safe to call repeatedly, and a
@@ -34,6 +36,14 @@ export async function preloadSculpts() {
     ({ GLTFLoader } = await import('../lib/GLTFLoader.js'));
   } catch (err) {
     console.warn('[vidhi] GLTFLoader unavailable, staying procedural:', err.message);
+    return;
+  }
+  // Must be ready before any sculpt is instanced: a shallow clone would give
+  // every copy one shared skeleton, so they would all animate in lockstep.
+  try {
+    ({ clone: skeletonUtils.clone } = await import('../lib/SkeletonUtils.js'));
+  } catch (err) {
+    console.warn('[vidhi] SkeletonUtils unavailable; sculpts stay procedural:', err.message);
     return;
   }
   const loader = new GLTFLoader();
@@ -107,8 +117,9 @@ function createSculpted(entry, type, boss, height) {
   // Skinned meshes cannot be cloned with Object3D.clone - the copies would
   // share one skeleton and animate in lockstep.
   const { clone } = skeletonUtils;
+  if (!clone) throw new Error('SkeletonUtils not loaded');
   const root = new THREE.Group();
-  const model = clone ? clone(entry.scene) : entry.scene.clone(true);
+  const model = clone(entry.scene);
   const cfg = entry.cfg;
 
   // Fit to the gameplay height and stand it on the floor, so a sculpt authored
@@ -121,23 +132,14 @@ function createSculpted(entry, type, boss, height) {
   model.position.y = -box.min.y * fit + (cfg.offsetY || 0);
   model.rotation.y = cfg.yaw || 0;
 
-  const materials = [];
+  // One pass: shadow flags, culling, and per-instance material clones so this
+  // monster can flash red or fade out without dragging its species with it.
+  const clonedFor = new Map();
   model.traverse((o) => {
     if (!o.isMesh && !o.isSkinnedMesh) return;
     o.castShadow = true;
     o.receiveShadow = true;
     o.frustumCulled = false; // skinned bounds go stale as the pose changes
-    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
-      if (m && !materials.includes(m)) {
-        // Clone so this instance can flash and fade on its own.
-        materials.push(m);
-      }
-    }
-  });
-  // Re-assign per-instance material clones
-  const clonedFor = new Map();
-  model.traverse((o) => {
-    if (!o.isMesh && !o.isSkinnedMesh) return;
     const swap = (m) => {
       if (!m) return m;
       if (!clonedFor.has(m)) clonedFor.set(m, m.clone());
@@ -242,11 +244,3 @@ function createSculpted(entry, type, boss, height) {
   };
 }
 
-// SkeletonUtils is only needed once a sculpt is actually in play, so it is
-// imported lazily alongside the loader.
-const skeletonUtils = {};
-if (HAS_SCULPTS) {
-  import('../lib/SkeletonUtils.js')
-    .then((m) => { skeletonUtils.clone = m.clone; })
-    .catch(() => { /* falls back to a shallow clone, fine for static meshes */ });
-}

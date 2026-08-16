@@ -120,7 +120,8 @@ authored with:
   wall behind it. The renderer watches its own frame time and drops shadows if
   the machine cannot hold 30fps with them on.
 
-Level 3 — fifteen enemies plus the boss — renders in 273 draw calls.
+Level 3 — fifteen enemies plus the boss — renders in roughly 275 draw calls
+(it moves by one or two depending on which variants spawn).
 
 ### Asura — *the swarm*
 
