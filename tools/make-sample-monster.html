@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>VIDHI - sample .glb generator</title>
+  <script type="importmap">
+    { "imports": { "three": "../lib/three.module.min.js" } }
+  </script>
+</head>
+<body>
+<p>Generating sample monster…</p>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFExporter } from './vendor/GLTFExporter.js';
+
+// Builds a deliberately crude skinned, animated monster and exports it as a
+// .glb. It is not meant to look good - it exists so you can prove the sculpt
+// pipeline works end to end before spending time sourcing a real model, and so
+// you have a known-good file to compare against when one misbehaves.
+//
+// Deliberately exercises everything the loader path cares about:
+//   - a skinned mesh bound to a real skeleton (so per-instance cloning matters)
+//   - four named clips: Idle / Walk / Attack / Death
+//   - Y-up, facing +Z, feet at the origin
+//   - an embedded texture, so nothing depends on side-car files
+
+const BONES = [
+  { name: 'root',  parent: null,   pos: [0, 0, 0] },
+  { name: 'hips',  parent: 'root', pos: [0, 0.9, 0] },
+  { name: 'chest', parent: 'hips', pos: [0, 0.5, 0] },
+  { name: 'head',  parent: 'chest', pos: [0, 0.45, 0] },
+  { name: 'armL',  parent: 'chest', pos: [-0.28, 0.3, 0] },
+  { name: 'armR',  parent: 'chest', pos: [0.28, 0.3, 0] },
+  { name: 'legL',  parent: 'hips', pos: [-0.16, -0.05, 0] },
+  { name: 'legR',  parent: 'hips', pos: [0.16, -0.05, 0] },
+];
+
+const bones = {};
+const order = [];
+for (const def of BONES) {
+  const b = new THREE.Bone();
+  b.name = def.name;
+  b.position.set(...def.pos);
+  bones[def.name] = b;
+  order.push(b);
+  if (def.parent) bones[def.parent].add(b);
+}
+const skeleton = new THREE.Skeleton(order);
+
+// A lumpy body: one capsule-ish tube, skinned to whichever bone is nearest.
+const geo = new THREE.CylinderGeometry(0.22, 0.3, 1.9, 16, 24);
+geo.translate(0, 1.05, 0);
+const pos = geo.attributes.position;
+const skinIndex = [];
+const skinWeight = [];
+const boneWorld = order.map((b) => {
+  const v = new THREE.Vector3();
+  b.updateWorldMatrix(true, false);
+  v.setFromMatrixPosition(b.matrixWorld);
+  return v;
+});
+const p = new THREE.Vector3();
+for (let i = 0; i < pos.count; i++) {
+  p.fromBufferAttribute(pos, i);
+  // Wobble the silhouette so it is obviously not a cylinder
+  const bulge = 1 + Math.sin(p.y * 7) * 0.12 + Math.sin(p.x * 9 + p.z * 5) * 0.06;
+  pos.setXYZ(i, p.x * bulge, p.y, p.z * bulge);
+  let best = 1, bestD = Infinity, second = 1, secondD = Infinity;
+  for (let b = 1; b < order.length; b++) {
+    const d = boneWorld[b].distanceTo(p);
+    if (d < bestD) { secondD = bestD; second = best; bestD = d; best = b; }
+    else if (d < secondD) { secondD = d; second = b; }
+  }
+  const w = bestD / (bestD + secondD || 1);
+  skinIndex.push(best, second, 0, 0);
+  skinWeight.push(1 - w, w, 0, 0);
+}
+geo.computeVertexNormals();
+geo.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndex, 4));
+geo.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeight, 4));
+
+// Embedded texture so the .glb is genuinely self-contained
+const c = document.createElement('canvas');
+c.width = c.height = 128;
+const ctx = c.getContext('2d');
+ctx.fillStyle = '#4b3c38';
+ctx.fillRect(0, 0, 128, 128);
+for (let i = 0; i < 400; i++) {
+  ctx.fillStyle = `rgba(${20 + Math.random() * 90 | 0},${10 + Math.random() * 40 | 0},${10 + Math.random() * 30 | 0},0.6)`;
+  ctx.beginPath();
+  ctx.arc(Math.random() * 128, Math.random() * 128, Math.random() * 7, 0, 7);
+  ctx.fill();
+}
+const tex = new THREE.CanvasTexture(c);
+tex.colorSpace = THREE.SRGBColorSpace;
+
+const mesh = new THREE.SkinnedMesh(
+  geo,
+  new THREE.MeshStandardMaterial({ map: tex, roughness: 0.75, metalness: 0 }),
+);
+mesh.name = 'SampleMonsterBody';
+mesh.add(order[0]);
+mesh.bind(skeleton);
+
+const scene = new THREE.Scene();
+scene.name = 'SampleMonster';
+scene.add(mesh);
+
+// --- Four clips, named exactly as the loader's fallback matcher expects
+const track = (bone, prop, times, values, Type) =>
+  new Type(`${bone}.${prop}`, times, values);
+const quat = (x, y, z) => {
+  const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y, z));
+  return [q.x, q.y, q.z, q.w];
+};
+
+const clips = [];
+clips.push(new THREE.AnimationClip('Idle', 2, [
+  track('chest', 'quaternion', [0, 1, 2],
+    [...quat(0, 0, 0), ...quat(0.06, 0, 0), ...quat(0, 0, 0)], THREE.QuaternionKeyframeTrack),
+  track('head', 'quaternion', [0, 1, 2],
+    [...quat(0, -0.2, 0), ...quat(0, 0.2, 0), ...quat(0, -0.2, 0)], THREE.QuaternionKeyframeTrack),
+]));
+clips.push(new THREE.AnimationClip('Walk', 1, [
+  track('legL', 'quaternion', [0, 0.5, 1],
+    [...quat(0.6, 0, 0), ...quat(-0.6, 0, 0), ...quat(0.6, 0, 0)], THREE.QuaternionKeyframeTrack),
+  track('legR', 'quaternion', [0, 0.5, 1],
+    [...quat(-0.6, 0, 0), ...quat(0.6, 0, 0), ...quat(-0.6, 0, 0)], THREE.QuaternionKeyframeTrack),
+  track('armL', 'quaternion', [0, 0.5, 1],
+    [...quat(-0.5, 0, 0), ...quat(0.5, 0, 0), ...quat(-0.5, 0, 0)], THREE.QuaternionKeyframeTrack),
+  track('armR', 'quaternion', [0, 0.5, 1],
+    [...quat(0.5, 0, 0), ...quat(-0.5, 0, 0), ...quat(0.5, 0, 0)], THREE.QuaternionKeyframeTrack),
+]));
+clips.push(new THREE.AnimationClip('Attack', 0.8, [
+  track('armL', 'quaternion', [0, 0.4, 0.8],
+    [...quat(0, 0, 0), ...quat(-2.2, 0, -0.8), ...quat(0, 0, 0)], THREE.QuaternionKeyframeTrack),
+  track('armR', 'quaternion', [0, 0.4, 0.8],
+    [...quat(0, 0, 0), ...quat(-2.2, 0, 0.8), ...quat(0, 0, 0)], THREE.QuaternionKeyframeTrack),
+  track('chest', 'quaternion', [0, 0.4, 0.8],
+    [...quat(0, 0, 0), ...quat(-0.35, 0, 0), ...quat(0, 0, 0)], THREE.QuaternionKeyframeTrack),
+]));
+clips.push(new THREE.AnimationClip('Death', 1.2, [
+  track('hips', 'quaternion', [0, 1.2],
+    [...quat(0, 0, 0), ...quat(1.5, 0, 0.4)], THREE.QuaternionKeyframeTrack),
+  track('hips', 'position', [0, 1.2],
+    [0, 0.9, 0, 0, 0.25, 0], THREE.VectorKeyframeTrack),
+]));
+
+const exporter = new GLTFExporter();
+exporter.parse(
+  scene,
+  (glb) => {
+    const bytes = new Uint8Array(glb);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    window.__glb = btoa(bin);
+    window.__glbBytes = bytes.length;
+    window.ready = true;
+  },
+  (err) => { window.__error = String(err); window.ready = true; },
+  { binary: true, animations: clips },
+);
+</script>
+</body>
+</html>

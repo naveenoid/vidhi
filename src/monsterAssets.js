@@ -23,6 +23,15 @@
 //     stands still - the procedural poser cannot drive a foreign skeleton.
 
 export const MONSTER_MODELS = {
+  // Want to see the pipeline work before sourcing anything? Uncomment this.
+  // assets/monsters/sample-monster.glb ships with the repo: a deliberately
+  // crude rigged blob with Idle/Walk/Attack/Death clips. It is ugly on
+  // purpose - its job is to prove the plumbing, not to look good.
+  // asura: {
+  //   url: 'assets/monsters/sample-monster.glb',
+  //   clips: { idle: 'Idle', walk: 'Walk', attack: 'Attack', death: 'Death' },
+  // },
+
   // asura: {
   //   url: 'assets/monsters/asura.glb',
   //   yaw: 0,          // radians, if the sculpt faces something other than +Z

@@ -47,7 +47,7 @@ export class Renderer3D {
     // scene rather than standing in it. Only the enemies cast (the level is
     // excluded), so the extra pass stays cheap - a handful of draws.
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = coarse ? THREE.BasicShadowMap : THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = coarse ? THREE.BasicShadowMap : THREE.PCFShadowMap;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(68, canvas.clientWidth / canvas.clientHeight, 0.05, 60);

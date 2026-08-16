@@ -254,7 +254,11 @@ Procedural geometry has a ceiling. The detail that makes a creature genuinely
 frightening — pores, sagging skin, asymmetric growths, real muscle flow — comes
 from a sculpt, not from math. So the renderer will take one if you have one.
 
-Drop a `.glb` next to the game and name it in
+**📖 Full guide: [docs/SCULPTED-MONSTERS.md](docs/SCULPTED-MONSTERS.md)** — where
+to download free monsters, how to check one before committing to it, how to
+edit it in Blender, and what to do when it loads wrong.
+
+The short version. Drop a `.glb` into `assets/monsters/` and name it in
 [`src/monsterAssets.js`](src/monsterAssets.js):
 
 ```js
@@ -270,16 +274,24 @@ That is the whole integration. [`src/monsters.js`](src/monsters.js) fits the
 model to the species' gameplay height, stands it on the floor, clones its
 skeleton per instance, and drives its animation clips from the same state the
 procedural poser uses. Anything you leave unconfigured stays procedural, so you
-can sculpt one monster at a time. A model that fails to load logs a warning and
-falls back rather than taking the game down.
+can replace one monster at a time. A model that fails to load logs a warning
+and falls back rather than taking the game down.
 
-Sculpts can come from AI generation (Meshy, Tripo, Rodin), a marketplace
-(Sketchfab, itch.io), or Blender — plus Mixamo if you need the clips. Requirements
-are in the comments at the top of `monsterAssets.js`.
+Two tools ship with it:
 
-Note that adding one costs the repo its "no image assets, no build step"
-property, and the `.glb` will dwarf everything else in here. That trade is
-yours to make; the default ships procedural.
+```sh
+node tools/inspect-glb.mjs assets/monsters/asura.glb
+```
+
+prints a downloaded model's clip names, triangle count, bounds and any
+extension the loader cannot read — and hands you a ready-to-paste `clips`
+block. And `assets/monsters/sample-monster.glb` is a crude rigged blob with
+all four clips: uncomment it in `monsterAssets.js` to prove the pipeline works
+on your machine in two minutes, before you go hunting for a real model.
+
+Note that adding a real model costs the repo its "no image assets, no build
+step" property, and the `.glb` will dwarf everything else in here. That trade
+is yours to make; the default ships procedural.
 
 ### Layout
 
@@ -287,6 +299,7 @@ yours to make; the default ships procedural.
 src/models3d.js   procedural rigged monsters (geometry, skin, displacement)
 src/monsters.js   monster factory: sculpted glTF when present, procedural otherwise
 src/monsterAssets.js  where you name optional .glb sculpts (empty by default)
+assets/monsters/  optional .glb sculpts, plus a sample to test the pipeline
 src/renderer3d.js Three.js scene: level geometry, lights, shadows, monsters
 src/sprites3d.js  billboard art for pickups, flames, projectiles
 src/textures.js   procedural wall/floor/ceiling textures

@@ -14,6 +14,13 @@ import * as THREE from 'three';
 import { createMonster as createProcedural } from './models3d.js';
 import { MONSTER_MODELS, HAS_SCULPTS } from './monsterAssets.js';
 
+// GLTFLoader and SkeletonUtils live under lib/jsm/ in their original upstream
+// directory layout on purpose: GLTFLoader imports its siblings as
+// '../utils/...', so flattening them into lib/ makes those resolve to /utils/
+// and the whole import fails at runtime with "failed to fetch dynamically
+// imported module". Keep the tree shape when updating three.
+
+
 const loaded = new Map();   // key -> { scene, clips, cfg }
 // Populated by preloadSculpts before any sculpt can be instanced.
 const skeletonUtils = {};
@@ -33,7 +40,7 @@ export async function preloadSculpts() {
   loadStarted = true;
   let GLTFLoader;
   try {
-    ({ GLTFLoader } = await import('../lib/GLTFLoader.js'));
+    ({ GLTFLoader } = await import('../lib/jsm/loaders/GLTFLoader.js'));
   } catch (err) {
     console.warn('[vidhi] GLTFLoader unavailable, staying procedural:', err.message);
     return;
@@ -41,7 +48,7 @@ export async function preloadSculpts() {
   // Must be ready before any sculpt is instanced: a shallow clone would give
   // every copy one shared skeleton, so they would all animate in lockstep.
   try {
-    ({ clone: skeletonUtils.clone } = await import('../lib/SkeletonUtils.js'));
+    ({ clone: skeletonUtils.clone } = await import('../lib/jsm/utils/SkeletonUtils.js'));
   } catch (err) {
     console.warn('[vidhi] SkeletonUtils unavailable; sculpts stay procedural:', err.message);
     return;
