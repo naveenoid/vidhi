@@ -98,9 +98,30 @@ and posed every frame from the simulation's state — a walk cycle driven by how
 fast it is actually travelling, a rear-back that builds through the wind-up,
 and a death that topples the body and sinks it into the floor.
 
-Because they are solid geometry, they turn to face you, they occlude each
-other properly, and their eye-glow is the first thing you see coming out of
-the fog.
+A swept tube on its own reads as inflatable, so nothing keeps the shape it was
+authored with:
+
+- **Flesh noise** pushes every skin vertex along its normal before the mesh is
+  frozen, biased so troughs cut deeper than peaks. It breaks the *silhouette*,
+  not just the shading — no limb is a smooth cylinder any more.
+- **Cavity occlusion** is baked from that same noise into vertex colours, so
+  creases stay dark whichever way the torches are pointing. Free at runtime,
+  and it is what stops the surface looking like moulded plastic.
+- **Wet-flesh shading** — a small, dim, tight highlight over a desaturated
+  base, plus a cold fresnel rim so a body separates from the fog instead of
+  dissolving into it.
+- **Nothing is symmetrical.** Left and right are displaced with different noise
+  seeds, and every joint carries a fixed offset and twist. Three sculpt
+  variants are baked per species and instances pick one at random, on top of
+  per-instance shifts in stature, tone and gloss — so a room of asuras is a
+  pack, not one model stamped out nine times.
+- **They cast shadows.** A spotlight down the player's view carries a shadow
+  map that only the enemies write into, so a monster throws a shadow onto the
+  wall behind it. The renderer watches its own frame time and drops shadows if
+  the machine cannot hold 30fps with them on.
+
+Level 3 — fifteen enemies plus the boss — renders in roughly 275 draw calls
+(it moves by one or two depending on which variants spawn).
 
 ### Asura — *the swarm*
 
@@ -210,10 +231,15 @@ gold key · the fight itself is the level.
 - **Rendering** — Three.js (vendored in `lib/`, no build step): merged
   tile-grid wall geometry, procedural canvas textures, a pooled torch-light
   system with flicker and random outages, exponential fog, ACES tone mapping.
-- **Monsters** — procedural rigged 3D models built from swept tubes
-  (`src/models3d.js`). Geometry is baked once per monster type and shared
-  across every instance; materials are cloned per instance so a single monster
-  can flash red on a hit or fade out as a corpse.
+- **Monsters** — procedural rigged 3D models built from swept tubes, then
+  noise-displaced and cavity-occluded at bake time (`src/models3d.js`).
+  Geometry is baked once per species variant and shared across every instance;
+  materials are cloned per instance so a single monster can flash red on a hit
+  or fade out as a corpse. Sculpted glTF models can replace any species — see
+  below.
+- **Shadows** — one spotlight down the player's view carries the shadow map,
+  written only by enemies, with an automatic fallback if the frame budget
+  cannot take it.
 - **Simulation** — the game logic in `src/game.js` is still 2D and tile-based;
   the renderer is a pure view layer that maps game `(x, y)` onto scene
   `(x, height, z)`.
@@ -222,11 +248,46 @@ gold key · the fight itself is the level.
 - **Art** — every texture, sprite and model is generated at load time. No image
   files are loaded by the game.
 
+### Using sculpted models instead
+
+Procedural geometry has a ceiling. The detail that makes a creature genuinely
+frightening — pores, sagging skin, asymmetric growths, real muscle flow — comes
+from a sculpt, not from math. So the renderer will take one if you have one.
+
+Drop a `.glb` next to the game and name it in
+[`src/monsterAssets.js`](src/monsterAssets.js):
+
+```js
+export const MONSTER_MODELS = {
+  asura: {
+    url: 'assets/monsters/asura.glb',
+    clips: { idle: 'Idle', walk: 'Walk', attack: 'Attack', death: 'Death' },
+  },
+};
+```
+
+That is the whole integration. [`src/monsters.js`](src/monsters.js) fits the
+model to the species' gameplay height, stands it on the floor, clones its
+skeleton per instance, and drives its animation clips from the same state the
+procedural poser uses. Anything you leave unconfigured stays procedural, so you
+can sculpt one monster at a time. A model that fails to load logs a warning and
+falls back rather than taking the game down.
+
+Sculpts can come from AI generation (Meshy, Tripo, Rodin), a marketplace
+(Sketchfab, itch.io), or Blender — plus Mixamo if you need the clips. Requirements
+are in the comments at the top of `monsterAssets.js`.
+
+Note that adding one costs the repo its "no image assets, no build step"
+property, and the `.glb` will dwarf everything else in here. That trade is
+yours to make; the default ships procedural.
+
 ### Layout
 
 ```
-src/models3d.js   rigged 3D monsters (geometry + skin textures + posing)
-src/renderer3d.js Three.js scene: level geometry, lights, sprites, monsters
+src/models3d.js   procedural rigged monsters (geometry, skin, displacement)
+src/monsters.js   monster factory: sculpted glTF when present, procedural otherwise
+src/monsterAssets.js  where you name optional .glb sculpts (empty by default)
+src/renderer3d.js Three.js scene: level geometry, lights, shadows, monsters
 src/sprites3d.js  billboard art for pickups, flames, projectiles
 src/textures.js   procedural wall/floor/ceiling textures
 src/game.js       simulation: movement, combat, AI, pickups

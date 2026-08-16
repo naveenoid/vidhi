@@ -170,15 +170,120 @@ class Part {
     return this.idx.length === 0;
   }
 
-  build() {
+  // amp: how far the surface is pushed along its normal by the flesh noise.
+  // Zero leaves the shape as authored (teeth, eyes, metal).
+  build(amp, seed) {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     geo.setAttribute('normal', new THREE.Float32BufferAttribute(this.norm, 3));
     geo.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
     geo.setIndex(this.idx);
+    if (amp > 0) displace(geo, amp, seed);
+    bakeCavityAO(geo, amp);
     geo.computeBoundingSphere();
     return geo;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Surface detail
+//
+// Swept tubes are smooth, and smooth reads as inflatable rather than alive.
+// Every skin surface is pushed around by layered value noise before it is
+// frozen, so the silhouette itself breaks up: knotted muscle, slack hide,
+// bone pressing through. The same noise then drives a baked cavity term so
+// the pits stay dark no matter which way the torches are pointing.
+// ---------------------------------------------------------------------------
+
+// Cheap 3D value noise. Deterministic, so a monster looks the same every load.
+function hash3(x, y, z, seed) {
+  let h = Math.sin(x * 127.1 + y * 311.7 + z * 74.7 + seed * 45.3) * 43758.5453;
+  h -= Math.floor(h);
+  return h;
+}
+
+function vnoise(x, y, z, seed) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  const xf = x - xi, yf = y - yi, zf = z - zi;
+  const sx = xf * xf * (3 - 2 * xf);
+  const sy = yf * yf * (3 - 2 * yf);
+  const sz = zf * zf * (3 - 2 * zf);
+  const c = (i, j, k) => hash3(xi + i, yi + j, zi + k, seed);
+  const lx = (a, b) => a + (b - a) * sx;
+  const y0 = lx(c(0, 0, 0), c(1, 0, 0)) + (lx(c(0, 1, 0), c(1, 1, 0)) - lx(c(0, 0, 0), c(1, 0, 0))) * sy;
+  const y1 = lx(c(0, 0, 1), c(1, 0, 1)) + (lx(c(0, 1, 1), c(1, 1, 1)) - lx(c(0, 0, 1), c(1, 0, 1))) * sy;
+  return y0 + (y1 - y0) * sz;
+}
+
+// Layered noise in [-1, 1], biased so troughs are deeper than peaks: flesh
+// sags and creases more readily than it bulges.
+function fleshNoise(x, y, z, seed) {
+  let n = 0;
+  let f = 0.055;
+  let a = 1;
+  let norm = 0;
+  for (let o = 0; o < 4; o++) {
+    n += (vnoise(x * f, y * f, z * f, seed + o * 17) - 0.5) * 2 * a;
+    norm += a;
+    f *= 2.15;
+    a *= 0.52;
+  }
+  n /= norm;
+  return n < 0 ? n * 1.35 : n;
+}
+
+// Push every vertex along its normal, then rebuild normals so the lighting
+// follows the new surface. Shared vertices are displaced identically because
+// the noise is sampled in position space, so seams stay welded.
+function displace(geo, amp, seed = 1) {
+  const pos = geo.attributes.position;
+  const nrm = geo.attributes.normal;
+  const n = pos.count;
+  const detail = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    const d = fleshNoise(x, y, z, seed);
+    detail[i] = d;
+    pos.setXYZ(i, x + nrm.getX(i) * d * amp, y + nrm.getY(i) * d * amp, z + nrm.getZ(i) * d * amp);
+  }
+  geo.userData.detail = detail;
+  geo.computeVertexNormals();
+  pos.needsUpdate = true;
+  return geo;
+}
+
+// Bake the cavity term into vertex colours: creases go dark, ridges stay lit,
+// and downward-facing surfaces pick up a little extra occlusion. Costs nothing
+// at runtime and is what stops the models reading as smooth plastic.
+function bakeCavityAO(geo, amp) {
+  const pos = geo.attributes.position;
+  const nrm = geo.attributes.normal;
+  const n = pos.count;
+  const detail = geo.userData.detail;
+  const col = new Float32Array(n * 3);
+  // Undisplaced surfaces (metal, teeth, eyes) have no cavities to bake and
+  // should not be darkened; they still need the attribute because the
+  // materials all declare vertexColors.
+  if (amp === 0) {
+    col.fill(1);
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    delete geo.userData.detail;
+    return geo;
+  }
+  for (let i = 0; i < n; i++) {
+    const d = detail ? detail[i] : 0;
+    // Pits (negative displacement) darken hard; bumps brighten slightly.
+    let ao = 1 + (d < 0 ? d * 0.85 : d * 0.18);
+    // Undersides sit in their own shadow.
+    ao *= 0.78 + 0.22 * (nrm.getY(i) * 0.5 + 0.5);
+    ao = Math.max(0.46, Math.min(1.1, ao));
+    col[i * 3] = ao;
+    col[i * 3 + 1] = ao;
+    col[i * 3 + 2] = ao;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  delete geo.userData.detail;
+  return geo;
 }
 
 // A body part under construction: one Part per material slot.
@@ -214,8 +319,8 @@ class Rig {
 
 // Common shapes -------------------------------------------------------------
 
-const SPHERE = new THREE.SphereGeometry(1, 14, 10);
-const SPHERE_LO = new THREE.SphereGeometry(1, 9, 7);
+const SPHERE = new THREE.SphereGeometry(1, 22, 16);
+const SPHERE_LO = new THREE.SphereGeometry(1, 14, 10);
 const CONE = new THREE.ConeGeometry(1, 1, 8);
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 
@@ -242,8 +347,8 @@ function claw(len, thick, curl = 0.4, axis = [0, -1, 0], bend = [0, 0, 1]) {
   return tube(
     [[0, 0, 0], at(0.34, 0.04), at(0.68, 0.26), at(1, 0.7)],
     {
-      segs: 9,
-      radial: 6,
+      segs: 11,
+      radial: 9,
       radius: (t) => thick * (1 - t) ** 0.72 + 0.1,
       capEnd: false,
     },
@@ -286,48 +391,101 @@ function mottle(ctx, size, colors, count, rMin, rMax, alpha) {
   ctx.globalAlpha = 1;
 }
 
-// Charred, ember-cracked hide for the asura.
-function paintAsuraSkin(ctx, size) {
-  ctx.fillStyle = '#2c150f';
-  ctx.fillRect(0, 0, size, size);
-  // Ash-grey scorching over dried blood, so the hide reads as burnt meat
-  // rather than red plastic once the torches hit it.
-  mottle(ctx, size, ['#4a2418', '#5a2a18', '#1a0b07', '#3e3730', '#544a42'], 110, 8, 46, 0.6);
-  // Dry scab flaking
-  ctx.strokeStyle = 'rgba(18,4,2,0.5)';
-  for (let i = 0; i < 260; i++) {
-    const x = Math.random() * size;
-    const y = Math.random() * size;
-    ctx.lineWidth = 0.6 + Math.random() * 1.4;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x + (Math.random() - 0.5) * 20, y + (Math.random() - 0.5) * 20);
-    ctx.stroke();
-  }
-  // Ember fissures glowing through the crust
-  for (let i = 0; i < 16; i++) {
+// Splits, fissures and weeping cracks. Used on every hide: unbroken skin is
+// what made these read as inflatable.
+function fissures(ctx, size, count, color, width, len) {
+  for (let i = 0; i < count; i++) {
     let x = Math.random() * size;
     let y = Math.random() * size;
-    ctx.strokeStyle = `rgba(255,${90 + Math.random() * 70 | 0},20,${0.35 + Math.random() * 0.4})`;
-    ctx.lineWidth = 1 + Math.random() * 2;
+    let a = Math.random() * PI2;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width * (0.5 + Math.random());
+    ctx.lineCap = 'round';
     ctx.beginPath();
     ctx.moveTo(x, y);
-    for (let s = 0; s < 5; s++) {
-      x += (Math.random() - 0.5) * 30;
-      y += (Math.random() - 0.5) * 30;
+    const segs = 3 + ((Math.random() * 4) | 0);
+    for (let s = 0; s < segs; s++) {
+      a += (Math.random() - 0.5) * 1.4;
+      x += Math.cos(a) * len;
+      y += Math.sin(a) * len;
       ctx.lineTo(x, y);
     }
     ctx.stroke();
   }
 }
 
-// Overlapping cobra scales for the naga.
-function paintNagaScale(ctx, size) {
-  ctx.fillStyle = '#1b4a2b';
+// Dried and half-dried blood, pooled where it would actually run.
+function gore(ctx, size, amount) {
+  for (let i = 0; i < amount; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 6 + Math.random() * 26;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(${58 + Math.random() * 40 | 0},8,6,0.72)`);
+    g.addColorStop(0.55, 'rgba(38,6,5,0.4)');
+    g.addColorStop(1, 'rgba(24,4,4,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, PI2);
+    ctx.fill();
+    // Runs trailing downward from the pool
+    if (Math.random() < 0.6) {
+      ctx.strokeStyle = 'rgba(46,7,6,0.5)';
+      ctx.lineWidth = 1 + Math.random() * 2.5;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (Math.random() - 0.5) * 8, y + r * (0.8 + Math.random() * 1.6));
+      ctx.stroke();
+    }
+  }
+}
+
+// Asura: burnt-out flesh. Ash grey over dried blood, blistered and split,
+// with heat still showing deep in the fissures.
+function paintAsuraSkin(ctx, size) {
+  ctx.fillStyle = '#4a423c';
   ctx.fillRect(0, 0, size, size);
-  mottle(ctx, size, ['#2f7345', '#123522', '#3f8a52'], 60, 10, 50, 0.5);
-  const rows = 16;
-  const cols = 16;
+  mottle(ctx, size, ['#5d554d', '#332c28', '#6b6058', '#3e2f28', '#241c19'], 130, 8, 52, 0.7);
+  // Blistering
+  for (let i = 0; i < 340; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 1 + Math.random() * 4;
+    const g = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, 0, x, y, r);
+    g.addColorStop(0, 'rgba(150,138,126,0.5)');
+    g.addColorStop(1, 'rgba(26,20,17,0.42)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, PI2);
+    ctx.fill();
+  }
+  fissures(ctx, size, 46, 'rgba(14,9,7,0.75)', 1.7, 9);
+  gore(ctx, size, 14);
+  // Heat still alive at the bottom of the deepest splits
+  for (let i = 0; i < 9; i++) {
+    let x = Math.random() * size;
+    let y = Math.random() * size;
+    ctx.strokeStyle = `rgba(198,${64 + Math.random() * 40 | 0},14,${0.3 + Math.random() * 0.3})`;
+    ctx.lineWidth = 0.9 + Math.random() * 1.4;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    for (let s = 0; s < 4; s++) {
+      x += (Math.random() - 0.5) * 26;
+      y += (Math.random() - 0.5) * 26;
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+}
+
+// Naga: cold olive-grey scale, dull and sick rather than jewel-green, with
+// patches of shed skin lifting off it.
+function paintNagaScale(ctx, size) {
+  ctx.fillStyle = '#4c5340';
+  ctx.fillRect(0, 0, size, size);
+  mottle(ctx, size, ['#5c6349', '#333829', '#6a6d52', '#252a20'], 80, 10, 54, 0.65);
+  const rows = 18;
+  const cols = 18;
   const w = size / cols;
   const h = size / rows;
   for (let r = 0; r < rows; r++) {
@@ -335,77 +493,126 @@ function paintNagaScale(ctx, size) {
       const x = c * w + (r % 2 ? w / 2 : 0);
       const y = r * h;
       const g = ctx.createLinearGradient(x, y, x, y + h);
-      g.addColorStop(0, 'rgba(120,190,120,0.30)');
-      g.addColorStop(0.55, 'rgba(30,90,45,0.10)');
-      g.addColorStop(1, 'rgba(4,20,10,0.55)');
+      g.addColorStop(0, 'rgba(126,132,102,0.30)');
+      g.addColorStop(0.55, 'rgba(52,58,42,0.12)');
+      g.addColorStop(1, 'rgba(8,10,7,0.62)');
       ctx.fillStyle = g;
       ctx.beginPath();
       ctx.moveTo(x - w * 0.5, y);
       ctx.quadraticCurveTo(x, y + h * 1.5, x + w * 0.5, y);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = 'rgba(3,16,8,0.45)';
-      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = 'rgba(6,9,6,0.5)';
+      ctx.lineWidth = 0.9;
       ctx.stroke();
     }
   }
-}
-
-// Slate-purple demon hide, scarred, for the rakshasa.
-function paintRakshasaHide(ctx, size) {
-  ctx.fillStyle = '#241a33';
-  ctx.fillRect(0, 0, size, size);
-  mottle(ctx, size, ['#3a2b52', '#160f21', '#4a3663'], 80, 12, 55, 0.6);
-  // Pores
-  for (let i = 0; i < 900; i++) {
-    ctx.fillStyle = `rgba(10,6,16,${0.15 + Math.random() * 0.35})`;
+  // Shed skin peeling away in ragged sheets
+  for (let i = 0; i < 12; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    ctx.fillStyle = `rgba(186,182,158,${0.10 + Math.random() * 0.16})`;
     ctx.beginPath();
-    ctx.arc(Math.random() * size, Math.random() * size, 0.6 + Math.random() * 1.4, 0, PI2);
+    ctx.ellipse(x, y, 8 + Math.random() * 26, 5 + Math.random() * 14, Math.random() * PI2, 0, PI2);
     ctx.fill();
   }
-  // Old scars
-  for (let i = 0; i < 10; i++) {
+  fissures(ctx, size, 22, 'rgba(8,12,8,0.6)', 1.3, 11);
+  gore(ctx, size, 6);
+}
+
+// Rakshasa: grey-violet corpse flesh, bruised and stitched with old scar
+// tissue, blood dried into the creases.
+function paintRakshasaHide(ctx, size) {
+  ctx.fillStyle = '#4a4048';
+  ctx.fillRect(0, 0, size, size);
+  mottle(ctx, size, ['#5a4e5c', '#302932', '#655a64', '#3b2f38', '#221c26'], 110, 12, 58, 0.72);
+  // Bruising under the skin
+  for (let i = 0; i < 22; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 14 + Math.random() * 40;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(58,32,64,0.4)');
+    g.addColorStop(0.6, 'rgba(40,26,34,0.22)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, PI2);
+    ctx.fill();
+  }
+  // Pores and stubble
+  for (let i = 0; i < 1400; i++) {
+    ctx.fillStyle = `rgba(14,10,16,${0.14 + Math.random() * 0.4})`;
+    ctx.beginPath();
+    ctx.arc(Math.random() * size, Math.random() * size, 0.5 + Math.random() * 1.5, 0, PI2);
+    ctx.fill();
+  }
+  // Old wounds, raised and pale
+  for (let i = 0; i < 16; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
     const a = Math.random() * PI2;
-    const l = 20 + Math.random() * 70;
-    ctx.strokeStyle = 'rgba(150,120,150,0.22)';
-    ctx.lineWidth = 1.5 + Math.random() * 2;
+    const l = 24 + Math.random() * 80;
+    ctx.strokeStyle = 'rgba(168,146,158,0.28)';
+    ctx.lineWidth = 1.6 + Math.random() * 2.6;
     ctx.beginPath();
     ctx.moveTo(x, y);
     ctx.lineTo(x + Math.cos(a) * l, y + Math.sin(a) * l);
     ctx.stroke();
+    // Stitch marks across the worst of them
+    if (Math.random() < 0.45) {
+      ctx.strokeStyle = 'rgba(20,14,18,0.5)';
+      ctx.lineWidth = 1;
+      for (let s = 0; s < l / 9; s++) {
+        const px = x + Math.cos(a) * s * 9;
+        const py = y + Math.sin(a) * s * 9;
+        ctx.beginPath();
+        ctx.moveTo(px - Math.sin(a) * 4, py + Math.cos(a) * 4);
+        ctx.lineTo(px + Math.sin(a) * 4, py - Math.cos(a) * 4);
+        ctx.stroke();
+      }
+    }
   }
+  fissures(ctx, size, 26, 'rgba(12,8,14,0.6)', 1.5, 10);
+  gore(ctx, size, 10);
 }
 
+// Bone: stained and greasy, never white.
 function paintBone(ctx, size) {
-  ctx.fillStyle = '#cec2a6';
+  ctx.fillStyle = '#b3a892';
   ctx.fillRect(0, 0, size, size);
-  mottle(ctx, size, ['#e6dcc4', '#a8967a', '#8f8163'], 40, 10, 60, 0.45);
-  ctx.strokeStyle = 'rgba(80,66,40,0.35)';
-  for (let i = 0; i < 120; i++) {
+  mottle(ctx, size, ['#cabfa6', '#8e8168', '#6d6047', '#a08a63'], 55, 10, 62, 0.6);
+  ctx.strokeStyle = 'rgba(58,46,26,0.4)';
+  for (let i = 0; i < 160; i++) {
     const x = Math.random() * size;
     const y = Math.random() * size;
     ctx.lineWidth = 0.5 + Math.random();
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.lineTo(x + (Math.random() - 0.5) * 40, y + (Math.random() - 0.5) * 8);
+    ctx.lineTo(x + (Math.random() - 0.5) * 44, y + (Math.random() - 0.5) * 9);
     ctx.stroke();
   }
+  // Grime settling into the porous end and dried blood at the root
+  mottle(ctx, size, ['#4a3a22', '#2d2415'], 30, 14, 58, 0.5);
+  gore(ctx, size, 5);
 }
 
+// Tarnished metal. Whatever gold these things wore stopped shining a long
+// time ago.
 function paintGold(ctx, size) {
   const g = ctx.createLinearGradient(0, 0, size, size);
-  g.addColorStop(0, '#8a5f14');
-  g.addColorStop(0.35, '#e8bf52');
-  g.addColorStop(0.55, '#c8952f');
-  g.addColorStop(0.8, '#f2d47a');
-  g.addColorStop(1, '#7a5210');
+  g.addColorStop(0, '#3f3218');
+  g.addColorStop(0.35, '#9a8244');
+  g.addColorStop(0.55, '#6d5a2a');
+  g.addColorStop(0.8, '#a89055');
+  g.addColorStop(1, '#332811');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, size, size);
-  for (let i = 0; i < 200; i++) {
-    ctx.strokeStyle = `rgba(60,38,4,${0.1 + Math.random() * 0.3})`;
-    ctx.lineWidth = 0.5 + Math.random() * 1.5;
+  // Verdigris and soot in the low spots
+  mottle(ctx, size, ['#3c4a32', '#1e1a10', '#54452a'], 45, 8, 42, 0.55);
+  for (let i = 0; i < 260; i++) {
+    ctx.strokeStyle = `rgba(30,22,6,${0.14 + Math.random() * 0.36})`;
+    ctx.lineWidth = 0.5 + Math.random() * 1.6;
     const x = Math.random() * size;
     const y = Math.random() * size;
     ctx.beginPath();
@@ -415,13 +622,14 @@ function paintGold(ctx, size) {
   }
 }
 
+// Filthy rag, not cloth: soaked dark at the hem, worn through elsewhere.
 function paintCloth(ctx, size) {
-  ctx.fillStyle = '#5a1414';
+  ctx.fillStyle = '#4e4038';
   ctx.fillRect(0, 0, size, size);
-  mottle(ctx, size, ['#75201c', '#3a0c0c'], 40, 10, 50, 0.6);
-  ctx.strokeStyle = 'rgba(20,4,4,0.35)';
+  mottle(ctx, size, ['#5e4d42', '#312722', '#6a5445'], 50, 10, 52, 0.7);
+  ctx.strokeStyle = 'rgba(18,12,9,0.3)';
   ctx.lineWidth = 1;
-  for (let i = 0; i < size; i += 4) {
+  for (let i = 0; i < size; i += 3) {
     ctx.beginPath();
     ctx.moveTo(i, 0);
     ctx.lineTo(i, size);
@@ -429,21 +637,57 @@ function paintCloth(ctx, size) {
     ctx.lineTo(size, i);
     ctx.stroke();
   }
-  // Grime along the hem
-  mottle(ctx, size, ['#1a0505'], 25, 20, 70, 0.5);
+  // Threadbare patches
+  for (let i = 0; i < 24; i++) {
+    ctx.fillStyle = `rgba(12,8,6,${0.2 + Math.random() * 0.4})`;
+    ctx.beginPath();
+    ctx.ellipse(Math.random() * size, Math.random() * size,
+      3 + Math.random() * 12, 2 + Math.random() * 8, Math.random() * PI2, 0, PI2);
+    ctx.fill();
+  }
+  gore(ctx, size, 12);
 }
 
+// Horn and claw: dark keratin with growth rings and chipped tips.
 function paintHorn(ctx, size) {
-  ctx.fillStyle = '#3f3627';
+  ctx.fillStyle = '#4b4335';
   ctx.fillRect(0, 0, size, size);
-  mottle(ctx, size, ['#584b34', '#241d13', '#6b5c40'], 50, 12, 50, 0.6);
+  mottle(ctx, size, ['#645741', '#2a231a', '#7b6d51'], 55, 12, 52, 0.65);
   // Growth rings run across the horn (u wraps, v runs along it)
-  for (let y = 0; y < size; y += 7) {
-    ctx.strokeStyle = `rgba(20,15,8,${0.25 + Math.random() * 0.35})`;
-    ctx.lineWidth = 1 + Math.random() * 2.5;
+  for (let y = 0; y < size; y += 6) {
+    ctx.strokeStyle = `rgba(18,13,7,${0.24 + Math.random() * 0.4})`;
+    ctx.lineWidth = 1 + Math.random() * 2.8;
     ctx.beginPath();
     ctx.moveTo(0, y + Math.random() * 2);
     ctx.lineTo(size, y + Math.random() * 2);
+    ctx.stroke();
+  }
+  // Splits along the grain
+  for (let i = 0; i < 22; i++) {
+    const x = Math.random() * size;
+    ctx.strokeStyle = 'rgba(10,7,4,0.55)';
+    ctx.lineWidth = 0.8 + Math.random() * 1.6;
+    ctx.beginPath();
+    ctx.moveTo(x, Math.random() * size);
+    ctx.lineTo(x + (Math.random() - 0.5) * 6, Math.random() * size);
+    ctx.stroke();
+  }
+  gore(ctx, size, 4);
+}
+
+// Fresh blood, for the surfaces that are actually wet.
+function paintBlood(ctx, size) {
+  ctx.fillStyle = '#42090a';
+  ctx.fillRect(0, 0, size, size);
+  mottle(ctx, size, ['#6d1210', '#280505', '#8a1c14'], 60, 8, 44, 0.8);
+  for (let i = 0; i < 60; i++) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    ctx.strokeStyle = `rgba(${90 + Math.random() * 50 | 0},16,12,${0.3 + Math.random() * 0.4})`;
+    ctx.lineWidth = 1 + Math.random() * 3;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + (Math.random() - 0.5) * 10, y + 10 + Math.random() * 40);
     ctx.stroke();
   }
 }
@@ -459,6 +703,7 @@ function textures() {
     gold: canvasTex(paintGold, { size: 128 }),
     cloth: canvasTex(paintCloth, { size: 128, repeat: [2, 2] }),
     horn: canvasTex(paintHorn, { size: 128, repeat: [1, 2] }),
+    blood: canvasTex(paintBlood, { size: 128, repeat: [1, 1] }),
     glow: (() => {
       const c = document.createElement('canvas');
       c.width = c.height = 64;
@@ -482,50 +727,88 @@ function textures() {
 function materialProtos(type) {
   const T = textures();
   const skinMap = type === 'naga' ? T.naga : type === 'asura' ? T.asura : T.rakshasa;
-  const skinSpec = type === 'naga' ? 0x4a6a3a : 0x2a1a18;
+
+  // Wet flesh, not painted plastic. A broad low-shininess sheen is what makes
+  // a surface read as a toy; live tissue gives a small, hard, off-white
+  // highlight over a dark desaturated base. Every lit material also carries
+  // vertexColors so the baked cavity term multiplies in.
+  const flesh = (map, color, opts = {}) => rimLit(new THREE.MeshPhongMaterial({
+    map,
+    bumpMap: map,
+    bumpScale: 1.6,
+    color,
+    // A tight, dim highlight reads as damp. A broad bright one reads as
+    // varnished plastic, which is exactly what we are getting away from.
+    specular: 0x241f1b,
+    shininess: 64,
+    vertexColors: true,
+    ...opts,
+  }), opts.rim);
+
   return {
-    skin: new THREE.MeshPhongMaterial({
-      map: skinMap,
-      bumpMap: skinMap,
-      bumpScale: 0.9,
-      specular: skinSpec,
-      shininess: type === 'naga' ? 34 : 12,
+    skin: flesh(skinMap, type === 'naga' ? 0xb9c4a6 : type === 'asura' ? 0xcabbae : 0xbcb0c6),
+    // Bone stays matte and dirty - clean white teeth look comical.
+    bone: flesh(T.bone, 0xcabfa8, { specular: 0x1e1a16, shininess: 26, bumpScale: 0.8 }),
+    horn: flesh(T.horn, 0xc8bfa8, { specular: 0x241f18, shininess: 30, bumpScale: 1.2 }),
+    // What little metal survives is tarnished, not jewellery-bright.
+    gold: flesh(T.gold, 0xa89468, { specular: 0x6e6244, shininess: 52, bumpScale: 0.5 }),
+    cloth: flesh(T.cloth, 0xb4a89c, {
+      specular: 0x100d0b, shininess: 8, bumpScale: 1.1,
+      side: THREE.DoubleSide, // wraps and rags are open sheets, seen from inside
     }),
-    bone: new THREE.MeshPhongMaterial({
-      map: T.bone, bumpMap: T.bone, bumpScale: 0.4, specular: 0x554a34, shininess: 26,
-      color: 0x9a8f78, // knocked back so claws and teeth do not glare in torchlight
-    }),
-    horn: new THREE.MeshPhongMaterial({
-      map: T.horn, bumpMap: T.horn, bumpScale: 0.7, specular: 0x3a3020, shininess: 18,
-    }),
-    gold: new THREE.MeshPhongMaterial({
-      map: T.gold, color: 0xc09040, specular: 0xffe0a0, shininess: 80, emissive: 0x0c0700,
-    }),
-    cloth: new THREE.MeshPhongMaterial({
-      map: T.cloth, bumpMap: T.cloth, bumpScale: 0.5, specular: 0x201010, shininess: 6,
-      side: THREE.DoubleSide, // the dhoti is an open wrap, seen from inside too
-    }),
-    // Pale ventral scutes: keeps the naga's belly from picking up the same
-    // warm cast as its bone claws.
-    belly: new THREE.MeshPhongMaterial({
-      map: T.naga, color: 0x8c9a58, specular: 0x50583a, shininess: 22,
-    }),
+    // Pale ventral scutes, cold against the warm torchlight.
+    belly: flesh(T.naga, 0xd6d2a8, { specular: 0x2c2c24, shininess: 40 }),
     // Open sheets (the naga's hood) are seen from both faces.
-    membrane: new THREE.MeshPhongMaterial({
-      map: skinMap,
-      bumpMap: skinMap,
-      bumpScale: 0.7,
-      specular: skinSpec,
-      shininess: 30,
-      side: THREE.DoubleSide,
+    membrane: flesh(skinMap, type === 'naga' ? 0xafbb9e : 0xbcb0c6, {
+      side: THREE.DoubleSide, shininess: 54,
     }),
+    // Wet blood: darker than the hide, and glossier than anything else on it.
+    blood: rimLit(new THREE.MeshPhongMaterial({
+      map: T.blood, bumpMap: T.blood, bumpScale: 0.7,
+      color: 0x561512, specular: 0x4a231e, shininess: 86,
+      vertexColors: true, transparent: true, opacity: 0.95, side: THREE.DoubleSide,
+    })),
     eye: new THREE.MeshBasicMaterial({ color: 0xffffff }),
     // Emissive rather than unlit, so flames and hot cracks still catch a
     // little shading instead of reading as flat orange cardboard.
     ember: new THREE.MeshPhongMaterial({
-      color: 0x501004, emissive: 0xff5210, emissiveIntensity: 1, specular: 0xffc060, shininess: 40,
+      color: 0x3a0c03, emissive: 0xd83c08, emissiveIntensity: 1, specular: 0xffc060, shininess: 40,
     }),
   };
+}
+
+// Adds a view-angle rim term to a Phong material. In a level this dark a
+// creature's edge would otherwise dissolve into the fog; a cold rim separates
+// it from the background and reads as damp skin catching stray light.
+function rimLit(mat, rim) {
+  mat.userData.rim = rim || 0x5a6a86;
+  return applyRim(mat);
+}
+
+// Installs the rim patch on a material. Must be re-run after clone(): three's
+// Material.copy() carries neither onBeforeCompile nor customProgramCacheKey,
+// so a cloned material silently renders without the effect. The setting lives
+// in userData, which clone() does preserve.
+export function applyRim(mat) {
+  const color = new THREE.Color(mat.userData.rim);
+  const strength = 0.32;
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.rimColor = { value: color };
+    shader.uniforms.rimStrength = { value: strength };
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform vec3 rimColor;
+        uniform float rimStrength;`)
+      // After <opaque_fragment> so the rim is still tone-mapped and, more
+      // importantly, still fogged - it must fade with distance like everything
+      // else or it draws an outline around monsters you should not yet see.
+      .replace('#include <opaque_fragment>', `#include <opaque_fragment>
+        float rimF = 1.0 - abs(dot(normalize(vNormal), normalize(vViewPosition)));
+        gl_FragColor.rgb += rimColor * pow(rimF, 3.0) * rimStrength;`);
+  };
+  // Materials with different shader patches must not share a program.
+  mat.customProgramCacheKey = () => `rim${color.getHex()}`;
+  return mat;
 }
 
 // ---------------------------------------------------------------------------
@@ -534,14 +817,16 @@ function materialProtos(type) {
 // rotation in the poser is zero.
 // ---------------------------------------------------------------------------
 
-function buildAsura() {
+function buildAsura(seed = 1) {
   const rig = new Rig(112);
+  rig.dispScale = 1;
+  const r = rng(seed);
 
   // --- hips: narrow pelvis under a shredded loincloth
   const hips = rig.node('hips', null, [0, 52, 0]);
   hips.put('skin', tube(
     [[0, -9, 0], [0, -2, 0.5], [0, 7, -1]],
-    { segs: 8, radial: 12, radius: (t) => [8.5 - t * 1.6, 6.6 - t * 1.2] },
+    { segs: 16, radial: 20, radius: (t) => [8.5 - t * 1.6, 6.6 - t * 1.2] },
   ));
   // Torn loincloth: a few ragged strips of uneven length, hanging slack
   for (let i = 0; i < 7; i++) {
@@ -566,7 +851,7 @@ function buildAsura() {
     const bell = Math.sin(Math.min(1, t * 1.15) * Math.PI * 0.86);
     return [7 + bell * 7, 5.4 + bell * 3.4];
   };
-  torso.put('skin', tube(spine, { segs: 16, radial: 14, radius: chestR, vScale: 2 }));
+  torso.put('skin', tube(spine, { segs: 30, radial: 24, radius: chestR, vScale: 2 }));
   // Ribs pressing through the hide: fine arcs across the front only
   for (let i = 0; i < 4; i++) {
     const t = 0.3 + i * 0.15;
@@ -585,8 +870,8 @@ function buildAsura() {
   }
   // The fire in the chest cavity, showing only as a seam between the ribs
   torso.put('ember', tube(
-    [[0, 11, 4.4], [0, 17, 5.4], [0, 23, 5.2]],
-    { segs: 8, radial: 6, radius: (t) => [0.5 + Math.sin(t * Math.PI) * 0.35, 1.4] },
+    [[0, 12, 3.2], [0, 17, 4.1], [0, 22, 3.9]],
+    { segs: 12, radial: 10, radius: (t) => [0.22 + Math.sin(t * Math.PI) * 0.22, 1.1] },
   ));
   // Vertebral spikes marching up the spine
   for (let i = 0; i < 9; i++) {
@@ -609,19 +894,19 @@ function buildAsura() {
   const head = rig.node('head', 'torso', [0, 37, 4], 1.18);
   head.put('skin', tube(
     [[0, -2, -3], [0, 2, 1], [0, 4, 6]],
-    { segs: 6, radial: 10, radius: (t) => [4.2 + t * 2.4, 4 + t * 2.2] },
+    { segs: 14, radial: 16, radius: (t) => [4.2 + t * 2.4, 4 + t * 2.2] },
   ));
   // Cranium tapering into a long snout
   head.put('skin', tube(
     [[0, 3.5, 2], [0, 5, 8], [0, 3.6, 14], [0, 1.4, 20]],
-    { segs: 10, radial: 12, radius: (t) => [7.6 - t * 4.6, 7.2 - t * 4.8] },
+    { segs: 20, radial: 20, radius: (t) => [7.6 - t * 4.6, 7.2 - t * 4.8] },
   ));
   // Brow shelf overhanging the sockets
   head.put('skin', SPHERE, M({ p: [0, 6.4, 7.5], r: [-0.3, 0, 0], s: [8.2, 2.6, 5] }));
   // Sockets: dark pits with a burning coal set deep inside
   for (const side of [-1, 1]) {
     head.put('skin', SPHERE_LO, M({ p: [side * 4.2, 3.4, 8.4], s: [3.4, 3.2, 2.4] }));
-    head.put('eye', SPHERE_LO, M({ p: [side * 4.3, 3.4, 10.6], s: [2, 1.7, 1.4] }));
+    head.put('eye', SPHERE_LO, M({ p: [side * 4.3, 3.4, 10.3], s: [1.25, 1, 0.9] }));
   }
   // Nasal slits
   for (const side of [-1, 1]) {
@@ -636,15 +921,19 @@ function buildAsura() {
   }
   // Horns: heavy ridged pair sweeping up and back over the shoulders
   for (const side of [-1, 1]) {
+    // Horns differ per variant and per side: length, sweep, and the odd
+    // stunted or broken one.
+    const hl = 0.72 + r() * 0.62;
+    const hs = 0.8 + r() * 0.5;
     head.put('horn', tube(
       [
         [side * 4, 7.5, 2],
-        [side * 7.5, 14, -2],
-        [side * 9, 20, -10],
-        [side * 7, 22, -19],
-        [side * 4.5, 20, -25],
+        [side * 7.5, 14, -2 * hs],
+        [side * 9, 12 + 8 * hl, -10 * hs],
+        [side * 7, 13 + 9 * hl, -19 * hs],
+        [side * 4.5, 12 + 8 * hl, -25 * hs],
       ],
-      { segs: 18, radial: 9, radius: (t) => 3.1 * (1 - t) ** 0.55 + 0.15, capEnd: false, vScale: 3 },
+      { segs: 22, radial: 14, radius: (t) => 3.1 * (1 - t) ** 0.55 + 0.15, capEnd: false, vScale: 3 },
     ));
     // Cheek quills raked back along the jaw
     for (let i = 0; i < 3; i++) {
@@ -658,7 +947,7 @@ function buildAsura() {
   const jaw = rig.node('jaw', 'head', [0, 1, 3]);
   jaw.put('skin', tube(
     [[0, -1.5, -2], [0, -3.2, 5], [0, -3.6, 12], [0, -3, 17]],
-    { segs: 7, radial: 10, radius: (t) => [5 - t * 2.6, 2.8 - t * 1.2] },
+    { segs: 16, radial: 16, radius: (t) => [5 - t * 2.6, 2.8 - t * 1.2] },
   ));
   for (let i = -2; i <= 2; i++) {
     const big = Math.abs(i) === 2;
@@ -674,13 +963,13 @@ function buildAsura() {
     upper.put('skin', SPHERE, M({ p: [side * 1.5, 1.5, 0], s: [5.4, 5.6, 5.4] }));
     upper.put('skin', tube(
       [[0, 0, 0], [side * 1.5, -13, 0.5], [side * 1, -26, 0]],
-      { segs: 5, radial: 8, radius: (t) => 4.3 - t * 1.3 },
+      { segs: 14, radial: 16, radius: (t) => 4.3 - t * 1.3 },
     ));
 
     const fore = rig.node(`fore${s}`, `arm${s}`, [side * 1, -26, 0]);
     fore.put('skin', tube(
       [[0, 0, 0], [0, -13, -1], [0, -26, 0]],
-      { segs: 5, radial: 8, radius: (t) => 3.1 - t * 1.1 },
+      { segs: 14, radial: 16, radius: (t) => 3.1 - t * 1.1 },
     ));
     // Elbow spur, raked back like a blade
     fore.put('bone', claw(8, 1.5, 0.35, [side * 0.25, 0.45, -0.85], [0, 1, 0]), M({
@@ -702,21 +991,21 @@ function buildAsura() {
     const thigh = rig.node(`leg${s}`, 'hips', [side * 6.5, -4, 0]);
     thigh.put('skin', tube(
       [[0, 0, 2], [side * 1.2, -11, -2], [side * 1.6, -22, -6]],
-      { segs: 5, radial: 8, radius: (t) => 6.6 - t * 2.6 },
+      { segs: 14, radial: 16, radius: (t) => 6.6 - t * 2.6 },
     ));
 
     // Knee driven forward, shin raking back down to a raised heel
     const shin = rig.node(`shin${s}`, `leg${s}`, [side * 1.6, -22, -6]);
     shin.put('skin', tube(
       [[0, 0, 0], [0, -11, 4], [0, -22, 8]],
-      { segs: 5, radial: 8, radius: (t) => 4.4 - t * 2.4 },
+      { segs: 14, radial: 16, radius: (t) => 4.4 - t * 2.4 },
     ));
     shin.put('bone', claw(6.5, 1.4, 0.3, [0, 0.35, 0.9], [0, 1, 0]), M({ p: [0, 0.5, 2.6] }));
 
     const foot = rig.node(`foot${s}`, `shin${s}`, [0, -22, 8]);
     foot.put('skin', tube(
       [[0, 0, -1], [0, -4, 3], [0, -6.5, 8]],
-      { segs: 4, radial: 8, radius: (t) => 3.2 - t * 1.1 },
+      { segs: 10, radial: 14, radius: (t) => 3.2 - t * 1.1 },
     ));
     for (let i = -1; i <= 1; i++) {
       foot.put('skin', claw(6.5, 1.15, 0.3, [i * 0.32, -0.42, 0.85], [0, -1, 0]), M({
@@ -734,8 +1023,10 @@ function buildAsura() {
 // Naga - hooded serpent warrior rising from its coils
 // ---------------------------------------------------------------------------
 
-function buildNaga() {
+function buildNaga(seed = 1) {
   const rig = new Rig(108);
+  rig.dispScale = 0.85;
+  const r = rng(seed);
 
   // --- coils: a real spiral of body stacked on the floor
   const hips = rig.node('hips', null, [0, 0, 0]);
@@ -747,22 +1038,22 @@ function buildNaga() {
     coilPts.push([Math.cos(a) * r, 4 + t * 18, Math.sin(a) * r * 0.92]);
   }
   hips.put('skin', tube(coilPts, {
-    segs: 52,
-    radial: 10,
+    segs: 88,
+    radial: 18,
     radius: (t) => 8 - t * 2.6,
     vScale: 8,
   }));
   // Tail slipping out of the coil and flicking up
   hips.put('skin', tube(
     [[22, 4, 4], [28, 5, 13], [30, 8.5, 22], [26, 14, 28]],
-    { segs: 14, radial: 8, radius: (t) => 4.6 * (1 - t) ** 0.8 + 0.15, capEnd: false },
+    { segs: 20, radial: 14, radius: (t) => 4.6 * (1 - t) ** 0.8 + 0.15, capEnd: false },
   ));
 
   // --- trunk: serpentine body rising in an S out of the coil
   const trunk = rig.node('trunk', 'hips', [0, 21, 0]);
   trunk.put('skin', tube(
     [[0, 0, -3], [0, 11, 1], [0, 23, 3.5], [0, 35, 1], [0, 45, -3]],
-    { segs: 16, radial: 12, radius: (t) => [7.6 - t * 2.6, 7 - t * 2.4], vScale: 5 },
+    { segs: 30, radial: 22, radius: (t) => [7.6 - t * 2.6, 7 - t * 2.4], vScale: 5 },
   ));
   // Pale belly plates: shallow overlapping bands up the front only
   for (let i = 0; i < 16; i++) {
@@ -775,8 +1066,8 @@ function buildNaga() {
       { segs: 7, radial: 5, radius: () => [0.9, 0.3], capStart: false, capEnd: false },
     ));
   }
-  // Gold shoulder yoke
-  trunk.put('gold', ring(6.6, 1.1), M({ p: [0, 34, 0], r: [Math.PI / 2, 0, 0] }));
+  // Old rope still knotted round the trunk, sunk into the flesh
+  trunk.put('cloth', ring(6.6, 1.1), M({ p: [0, 34, 0], r: [Math.PI / 2, 0, 0] }));
 
   // --- hood: broad cobra shell flaring behind and around the head
   const hood = rig.node('hood', 'trunk', [0, 40, -2]);
@@ -790,7 +1081,7 @@ function buildNaga() {
     const z = -(Math.abs(u) ** 1.8) * 11 * w + Math.sin(v * Math.PI) * 3 - 2 - v * 5;
     return [x, y, z];
   };
-  hood.put('membrane', sheet(hoodAt, 26, 16));
+  hood.put('membrane', sheet(hoodAt, 40, 26));
   // Thick rim so the hood does not read as paper
   hood.put('membrane', tube(
     Array.from({ length: 15 }, (_, i) => hoodAt((i / 14) * 2 - 1, 0.045)),
@@ -803,40 +1094,47 @@ function buildNaga() {
       { segs: 10, radial: 5, radius: (t) => 1.5 - t * 0.7, capStart: false, capEnd: false },
     ));
   }
-  // Spectacle mark, inlaid in gold high on the back of the hood
+  // Two dead sockets marked into the back of the hood - the false eyes a real
+  // cobra wears, here sunken and weeping rather than painted gold.
   for (const side of [-1, 1]) {
-    hood.put('gold', ring(4.6, 0.9), M({ p: [side * 7, 30, -9], r: [0.2, 0, 0] }));
+    hood.put('blood', SPHERE_LO, M({ p: [side * 7, 29, -8], s: [4.4, 5.2, 1.2] }));
+    hood.put('bone', ring(4.6, 0.9), M({ p: [side * 7, 29, -8.6], r: [0.2, 0, 0] }));
   }
-  hood.put('gold', tube(
-    [[-6, 33.5, -8.6], [0, 35.5, -9.2], [6, 33.5, -8.6]],
-    { segs: 8, radial: 5, radius: () => 0.9, capStart: false, capEnd: false },
-  ));
+  // Ragged tears through the hood membrane, healed open
+  for (let i = 0; i < 5; i++) {
+    const u = -0.75 + i * 0.36 + (r() - 0.5) * 0.2;
+    const v = 0.25 + r() * 0.5;
+    hood.put('blood', tube(
+      [hoodAt(u, v - 0.16), hoodAt(u + 0.06, v), hoodAt(u - 0.03, v + 0.18)],
+      { segs: 6, radial: 5, radius: (t) => [1.5 * Math.sin(t * Math.PI) + 0.2, 1.4] },
+    ));
+  }
 
   // --- head: broad viper skull under a gold crown
   const head = rig.node('head', 'trunk', [0, 43, 0], 1.18);
   head.put('skin', tube(
     [[0, 0, -5], [0, 3, 2], [0, 2.6, 10], [0, 0.5, 18]],
-    { segs: 10, radial: 12, radius: (t) => [8.4 - t * 4, 6.6 - t * 3.6] },
+    { segs: 20, radial: 20, radius: (t) => [8.4 - t * 4, 6.6 - t * 3.6] },
   ));
   // Brow scutes with the eye set into the outer edge
   for (const side of [-1, 1]) {
     head.put('skin', SPHERE, M({ p: [side * 5, 4.4, 4], r: [0, 0, side * -0.25], s: [3.8, 2.4, 5] }));
     head.put('skin', SPHERE_LO, M({ p: [side * 6, 2.4, 5.6], s: [3.3, 3.3, 2.8] }));
-    head.put('eye', SPHERE_LO, M({ p: [side * 6.6, 2.6, 8], s: [2.3, 2.3, 1.8] }));
+    head.put('eye', SPHERE_LO, M({ p: [side * 6.6, 2.6, 7.8], s: [1.5, 1.5, 1.2] }));
   }
-  // Crown: a gold band with five flame-shaped points
-  head.put('gold', ring(6.4, 1.2, Math.PI * 1.35), M({ p: [0, 6.5, 0.5], r: [-1.35, 0, Math.PI * 0.83] }));
+  // A crest of bare bone spines pushing up through the scalp, uneven
   for (let i = -2; i <= 2; i++) {
-    head.put('gold', claw(9 - Math.abs(i) * 2, 1.5, 0.25, [i * 0.22, 1, 0.1], [0, 0, -1]), M({
-      p: [i * 4.4, 8.2, 1.6 - Math.abs(i) * 0.6],
-    }));
+    head.put('bone', claw(
+      (8 - Math.abs(i) * 1.8) * (0.75 + r() * 0.5), 1.4, 0.3,
+      [i * 0.3, 1, -0.15], [0, 0, -1],
+    ), M({ p: [i * 3.6, 6.4, 1.2 - Math.abs(i) * 0.5] }));
   }
 
   // --- jaw, fangs and a flicking forked tongue
   const jaw = rig.node('jaw', 'head', [0, -0.5, -1]);
   jaw.put('skin', tube(
     [[0, -1.5, -3], [0, -3.4, 5], [0, -3.6, 12], [0, -3, 18]],
-    { segs: 7, radial: 10, radius: (t) => [6.6 - t * 3.2, 2.6 - t * 1.1] },
+    { segs: 16, radial: 16, radius: (t) => [6.6 - t * 3.2, 2.6 - t * 1.1] },
   ));
   for (const side of [-1, 1]) {
     jaw.put('bone', claw(10, 1.5, 0.4, [side * 0.12, 1, -0.2], [0, 0, 1]), M({ p: [side * 4, -3.4, 9] }));
@@ -855,14 +1153,15 @@ function buildNaga() {
     upper.put('skin', SPHERE, M({ p: [side * 1.6, 0.5, 0], s: [4.2, 4.4, 4.2] }));
     upper.put('skin', tube(
       [[0, 0, 0], [side * 2.5, -12, 1.5], [side * 3, -24, 1]],
-      { segs: 5, radial: 8, radius: (t) => 3.4 - t * 0.9 },
+      { segs: 14, radial: 16, radius: (t) => 3.4 - t * 0.9 },
     ));
-    upper.put('gold', ring(3.1, 0.8), M({ p: [side * 2.8, -15, 1.2], r: [Math.PI / 2, 0, 0] }));
+    // Wire bitten into the arm, not an armlet
+    upper.put('bone', ring(3.1, 0.5), M({ p: [side * 2.8, -15, 1.2], r: [Math.PI / 2, 0, 0] }));
 
     const fore = rig.node(`fore${s}`, `arm${s}`, [side * 3, -24, 1]);
     fore.put('skin', tube(
       [[0, 0, 0], [0, -12, 1], [0, -24, 0.5]],
-      { segs: 5, radial: 8, radius: (t) => 2.6 - t * 0.8 },
+      { segs: 14, radial: 16, radius: (t) => 2.6 - t * 0.8 },
     ));
 
     fore.put('skin', SPHERE_LO, M({ p: [0, -25.4, 0.6], s: [2.7, 3, 2] }));
@@ -880,8 +1179,10 @@ function buildNaga() {
 // crowned, and wearing a mane of fire.
 // ---------------------------------------------------------------------------
 
-function buildRakshasa(boss) {
+function buildRakshasa(boss, seed = 1) {
   const rig = new Rig(boss ? 128 : 120);
+  rig.dispScale = 1.35; // a bulkier body needs bigger folds to read at all
+  const r = rng(seed);
   const K = boss ? 1.1 : 1; // the boss is thicker as well as taller
 
   // --- hips and dhoti. Legs carry the lower half of the body: hips at 58 of
@@ -889,7 +1190,7 @@ function buildRakshasa(boss) {
   const hips = rig.node('hips', null, [0, 58, 0]);
   hips.put('skin', tube(
     [[0, -10, 0], [0, -2, 0], [0, 8, 0]],
-    { segs: 8, radial: 12, radius: (t) => [(13 - t * 1.5) * K, (10 - t) * K] },
+    { segs: 16, radial: 20, radius: (t) => [(13 - t * 1.5) * K, (10 - t) * K] },
   ));
   // Dhoti: a wrapped skirt, scalloped at the hem so it hangs like cloth
   // instead of sitting on him like a barrel.
@@ -905,12 +1206,12 @@ function buildRakshasa(boss) {
       Math.cos(a) * 10.8 * K * drape,
     ];
   }, 40, 10));
-  hips.put('gold', ring(13.6 * K, 1.4), M({ p: [0, 4, 0], r: [Math.PI / 2, 0, 0] }));
+  hips.put('cloth', ring(13.6 * K, 1.4), M({ p: [0, 4, 0], r: [Math.PI / 2, 0, 0] }));
   // Knotted sash ends hanging down the front
   for (const off of [-4, 4]) {
     hips.put('cloth', tube(
       [[off, 3, 11 * K], [off * 1.3, -9, 12.5 * K], [off * 1.6, -23, 11.5 * K]],
-      { segs: 5, radial: 8, radius: (t) => [4.5 - t * 1.2, 1.2], capStart: false, capEnd: false },
+      { segs: 14, radial: 16, radius: (t) => [4.5 - t * 1.2, 1.2], capStart: false, capEnd: false },
     ));
   }
 
@@ -921,7 +1222,7 @@ function buildRakshasa(boss) {
     const chest = Math.sin(Math.min(1, t * 1.05) * Math.PI * 0.8);
     return [(13 + chest * 9) * K, (10.5 + chest * 5) * K];
   };
-  torso.put('skin', tube(spine, { segs: 16, radial: 14, radius: bodyR, vScale: 2 }));
+  torso.put('skin', tube(spine, { segs: 30, radial: 24, radius: bodyR, vScale: 2 }));
   // Pectoral slabs and gut fold
   for (const side of [-1, 1]) {
     torso.put('skin', SPHERE, M({ p: [side * 8 * K, 30, 9 * K], s: [9 * K, 6, 5.5 * K] }));
@@ -951,7 +1252,7 @@ function buildRakshasa(boss) {
   const neck = rig.node('neck', 'torso', [0, 40, 0]);
   neck.put('skin', tube(
     [[0, -5, -1], [0, 3, 0], [0, 11, 1]],
-    { segs: 6, radial: 10, radius: (t) => [(8.5 - t * 1.4) * K, (9 - t * 1.6) * K] },
+    { segs: 14, radial: 16, radius: (t) => [(8.5 - t * 1.4) * K, (9 - t * 1.6) * K] },
   ));
 
   // Scaled up as a whole: a brute this wide needs a big head to read at all
@@ -960,16 +1261,16 @@ function buildRakshasa(boss) {
     boss
       ? [[0, 0, -8], [0, 4, 0], [0, 2, 9], [0, -2, 18]]
       : [[0, 0, -7], [0, 4, 0], [0, 2.5, 8], [0, 0, 15]],
-    { segs: 10, radial: 12, radius: (t) => [(11 - t * 4.4) * K, (10.5 - t * 4.6) * K] },
+    { segs: 20, radial: 20, radius: (t) => [(11 - t * 4.4) * K, (10.5 - t * 4.6) * K] },
   ));
   // Heavy brow shelf
   head.put('skin', SPHERE, M({ p: [0, 5.2, 6], r: [-0.25, 0, 0], s: [11.5 * K, 3.2, 5] }));
   // Two burning slits plus the third eye above the brow
   for (const side of [-1, 1]) {
     head.put('skin', SPHERE_LO, M({ p: [side * 5 * K, 2, 7.6], s: [3.8, 3.2, 2.6] }));
-    head.put('eye', SPHERE_LO, M({ p: [side * 5.1 * K, 2.2, 10], s: [2.6, 1.8, 1.5] }));
+    head.put('eye', SPHERE_LO, M({ p: [side * 5.1 * K, 2.2, 9.7], s: [1.7, 1.15, 1] }));
   }
-  head.put('eye', SPHERE_LO, M({ p: [0, 8.6, 8], r: [0, 0, 0], s: [1.5, 3, 1.4] }));
+  head.put('eye', SPHERE_LO, M({ p: [0, 8.6, 7.8], r: [0, 0, 0], s: [0.95, 2, 0.9] }));
   // Flat bovine nose pad and nostrils
   head.put('skin', SPHERE, M({ p: [0, -1.5, boss ? 17 : 14], s: [6.5, 4.6, 3.4] }));
   for (const side of [-1, 1]) {
@@ -977,29 +1278,33 @@ function buildRakshasa(boss) {
   }
   // Ears and gold discs
   for (const side of [-1, 1]) {
+    // Torn ear, with the ring that tore it still through the remains
     head.put('skin', SPHERE, M({ p: [side * 10.5 * K, 1, -1], r: [0, 0, side * 0.4], s: [3, 5, 2.4] }));
-    head.put('gold', ring(3, 0.8), M({ p: [side * 11 * K, -4.5, -1], r: [0, Math.PI / 2, 0] }));
+    head.put('gold', ring(3, 0.6, Math.PI * 1.5), M({ p: [side * 11 * K, -4.5, -1], r: [0, Math.PI / 2, 0.6] }));
   }
   // Horns: ram-curled for the rakshasa, a wide buffalo sweep for the boss
   for (const side of [-1, 1]) {
+    // Horn spread and curl vary per variant and per side
+    const hw = 0.82 + r() * 0.42;
+    const hc = 0.78 + r() * 0.5;
     const pts = boss
       ? [
         [side * 7, 8, -1],
-        [side * 18, 12, -3],
-        [side * 29, 13, -5],
-        [side * 37, 18, -2],
-        [side * 36, 27, 6],
+        [side * 18 * hw, 12, -3],
+        [side * 29 * hw, 13, -5 * hc],
+        [side * 37 * hw, 18, -2 * hc],
+        [side * 36 * hw, 20 + 9 * hc, 6 * hc],
       ]
       : [
         [side * 8, 7, -1],
-        [side * 16, 12, -4],
-        [side * 20, 10, -12],
-        [side * 15, 3, -16],
-        [side * 10, 0, -11],
+        [side * 16 * hw, 12, -4 * hc],
+        [side * 20 * hw, 10, -12 * hc],
+        [side * 15 * hw, 3, -16 * hc],
+        [side * 10 * hw, 0, -11 * hc],
       ];
     head.put('horn', tube(pts, {
-      segs: 12,
-      radial: 8,
+      segs: 22,
+      radial: 14,
       radius: (t) => (boss ? 5.4 : 4.4) * (1 - t) ** 0.55 + 0.2,
       capEnd: false,
       vScale: 3,
@@ -1009,7 +1314,7 @@ function buildRakshasa(boss) {
   const jaw = rig.node('jaw', 'head', [0, -1, -1]);
   jaw.put('skin', tube(
     [[0, -2, -4], [0, -5, 4], [0, -5.5, 12], [0, -4.5, boss ? 18 : 15]],
-    { segs: 7, radial: 10, radius: (t) => [(9 - t * 3.6) * K, 4.2 - t * 1.5] },
+    { segs: 16, radial: 16, radius: (t) => [(9 - t * 3.6) * K, 4.2 - t * 1.5] },
   ));
   for (let i = -2; i <= 2; i++) {
     jaw.put('bone', BOX, M({
@@ -1026,12 +1331,13 @@ function buildRakshasa(boss) {
   }
 
   if (boss) {
-    // Crown of gold spikes across the brow
-    head.put('gold', ring(9.5, 1.8, Math.PI * 1.25), M({ p: [0, 9, 1], r: [-1.3, 0, Math.PI * 0.87] }));
+    // A crown of driven iron: spikes hammered through the skull, not worn on it
+    head.put('gold', ring(9.5, 1.4, Math.PI * 1.25), M({ p: [0, 9, 1], r: [-1.3, 0, Math.PI * 0.87] }));
     for (let i = -2; i <= 2; i++) {
-      head.put('gold', claw(11 - Math.abs(i) * 2.4, 2, 0.2, [i * 0.2, 1, 0.05], [0, 0, -1]), M({
-        p: [i * 5.4, 11.5, 2 - Math.abs(i) * 0.7],
+      head.put('gold', claw(12 - Math.abs(i) * 2.4, 1.5, 0.12, [i * 0.24, 1, 0.05], [0, 0, -1]), M({
+        p: [i * 5.4, 10.5, 2 - Math.abs(i) * 0.7],
       }));
+      head.put('blood', SPHERE_LO, M({ p: [i * 5.4, 9.5, 2.4 - Math.abs(i) * 0.7], s: [3, 2.4, 2.6] }));
     }
     // Mane of fire flaring off the back of the skull
     for (let i = 0; i < 15; i++) {
@@ -1050,9 +1356,16 @@ function buildRakshasa(boss) {
     upper.put('skin', SPHERE, M({ p: [side * 2, 2, 0], s: [10.5 * K, 10 * K, 10.5 * K] }));
     upper.put('skin', tube(
       [[0, 0, 0], [side * 2.5, -12, 1], [side * 2.5, -24, 0]],
-      { segs: 5, radial: 8, radius: (t) => (7.6 - t * 1.9) * K },
+      { segs: 14, radial: 16, radius: (t) => (7.6 - t * 1.9) * K },
     ));
+    // Iron shackle, with a broken length of chain still hanging off it
     upper.put('gold', ring(6.4 * K, 1.5), M({ p: [side * 2.5, -11, 0.5], r: [Math.PI / 2, 0, 0] }));
+    for (let i = 0; i < 4; i++) {
+      upper.put('gold', ring(1.9, 0.55), M({
+        p: [side * 6.5 * K, -12 - i * 3.2, 1 + Math.sin(i) * 0.8],
+        r: [i % 2 ? 0 : Math.PI / 2, 0, 0.2],
+      }));
+    }
     // Shoulder spurs
     for (let i = 0; i < 3; i++) {
       upper.put('bone', claw(8, 1.7, 0.3, [side * 0.75, 0.6, (i - 1) * 0.35], [0, 1, 0]), M({
@@ -1063,7 +1376,7 @@ function buildRakshasa(boss) {
     const fore = rig.node(`fore${s}`, `arm${s}`, [side * 2.5, -24, 0]);
     fore.put('skin', tube(
       [[0, 0, 0], [0, -12, 1.5], [0, -24, 0]],
-      { segs: 5, radial: 8, radius: (t) => (6 - t * 1.7) * K },
+      { segs: 14, radial: 16, radius: (t) => (6 - t * 1.7) * K },
     ));
 
     fore.put('skin', SPHERE_LO, M({ p: [0, -26.5, 1], s: [5.2 * K, 5.6, 4.2] }));
@@ -1080,20 +1393,20 @@ function buildRakshasa(boss) {
     const thigh = rig.node(`leg${s}`, 'hips', [side * 8.5 * K, -8, 0]);
     thigh.put('skin', tube(
       [[0, 0, 1], [side * 1.5, -12, 0], [side * 2, -24, -1]],
-      { segs: 5, radial: 8, radius: (t) => (9.8 - t * 2.8) * K },
+      { segs: 14, radial: 16, radius: (t) => (9.8 - t * 2.8) * K },
     ));
 
     const shin = rig.node(`shin${s}`, `leg${s}`, [side * 2, -24, -1]);
     shin.put('skin', tube(
       [[0, 0, 0], [0, -9, 0.5], [0, -18, 2]],
-      { segs: 5, radial: 8, radius: (t) => (7 - t * 2.6) * K },
+      { segs: 14, radial: 16, radius: (t) => (7 - t * 2.6) * K },
     ));
-    shin.put('gold', ring(4.8 * K, 1.2), M({ p: [0, -16, 1.6], r: [Math.PI / 2, 0, 0] }));
+    shin.put('gold', ring(4.8 * K, 1.2), M({ p: [0, -16, 1.6], r: [Math.PI / 2, 0, 0] })); // leg iron
 
     const foot = rig.node(`foot${s}`, `shin${s}`, [0, -18, 2]);
     foot.put('skin', tube(
       [[0, 0, -4], [0, -2.5, 2], [0, -3.6, 9]],
-      { segs: 5, radial: 8, radius: (t) => (5.4 - t * 1.4) * K },
+      { segs: 14, radial: 16, radius: (t) => (5.4 - t * 1.4) * K },
     ));
     for (let i = -1; i <= 1; i++) {
       foot.put('skin', claw(6.5, 1.4, 0.3, [i * 0.28, -0.4, 0.87], [0, -1, 0]), M({
@@ -1111,23 +1424,78 @@ function buildRakshasa(boss) {
 
 const RIG_CACHE = new Map();
 
-function rigFor(type, boss) {
-  const key = boss ? 'boss' : type;
+// How hard the flesh noise bites into each material. Soft tissue moves a lot;
+// teeth, claws and metal keep the shape they were authored with, or they stop
+// reading as hard.
+const DISPLACE_BY_MATERIAL = {
+  skin: 1, membrane: 0.85, cloth: 0.8, belly: 0.45, blood: 0.2,
+  bone: 0.2, horn: 0.35, gold: 0, eye: 0, ember: 0.35,
+};
+
+// Faces need to stay legible, and fingers are too thin to survive much.
+const DISPLACE_BY_NODE = { head: 0.5, jaw: 0.45, hood: 0.7 };
+
+const BASE_DISPLACE = 0.95;
+
+// Three variants are baked per monster type. Instances pick one at random, so
+// a room of asuras is not a row of identical clones - the single strongest
+// cue that something is a game asset rather than a creature.
+export const VARIANTS = 3;
+
+function rigFor(type, boss, variant = 0) {
+  const key = `${boss ? 'boss' : type}#${variant}`;
   if (!RIG_CACHE.has(key)) {
-    const rig = type === 'asura' ? buildAsura()
-      : type === 'naga' ? buildNaga()
-        : buildRakshasa(!!boss);
-    // Bake each node's material slots into finished geometries once.
+    const seed = 1 + variant * 37;
+    const rig = type === 'asura' ? buildAsura(seed)
+      : type === 'naga' ? buildNaga(seed)
+        : buildRakshasa(!!boss, seed);
+    // Bake each node's material slots into finished geometries once. Left and
+    // right get different noise seeds so nothing is mirror-perfect.
     for (const node of rig.nodes) {
       node.geos = new Map();
+      const nodeAmp = DISPLACE_BY_NODE[node.name] !== undefined ? DISPLACE_BY_NODE[node.name] : 1;
+      const sideSeed = node.name.endsWith('R') ? seed + 101 : seed;
       for (const [mat, part] of node.slots) {
-        if (!part.empty) node.geos.set(mat, part.build());
+        if (part.empty) continue;
+        const amp = BASE_DISPLACE * nodeAmp * (DISPLACE_BY_MATERIAL[mat] || 0) * (rig.dispScale || 1);
+        node.geos.set(mat, part.build(amp, sideSeed));
       }
       node.slots = null;
     }
+    applyAsymmetry(rig, seed);
     RIG_CACHE.set(key, rig);
   }
   return RIG_CACHE.get(key);
+}
+
+function rng(seed) {
+  let a = seed * 1831565813 + 0x6D2B79F5;
+  return () => {
+    a = Math.imul(a ^ (a >>> 15), 1 | a);
+    a = (a + Math.imul(a ^ (a >>> 7), 61 | a)) ^ a;
+    return ((a ^ (a >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Nothing alive is bilaterally perfect, and perfect symmetry is what makes a
+// model read as a toy. Each node gets a small fixed offset and twist, baked
+// into its meshes rather than its group, so the per-frame poser cannot wipe
+// it. Different variants are lopsided in different directions.
+function applyAsymmetry(rig, seed) {
+  const r = rng(seed);
+  const jitter = (k) => (r() - 0.5) * 2 * k;
+  for (const node of rig.nodes) {
+    // The pelvis anchors the whole body; shifting it would lift the feet.
+    const shoulderOrHip = /^(arm|leg|fore|shin|foot)/.test(node.name);
+    const posK = shoulderOrHip ? 1.6 : node.name === 'hips' ? 0 : 0.9;
+    const rotK = node.name === 'hips' ? 0.02 : 0.075;
+    node.rest = {
+      p: [jitter(posK), jitter(posK * 0.7), jitter(posK)],
+      r: [jitter(rotK), jitter(rotK * 1.4), jitter(rotK)],
+      // A limb that is a few percent longer or thinner than its twin
+      s: 1 + jitter(shoulderOrHip ? 0.05 : 0.025),
+    };
+  }
 }
 
 // Where the eye-glow billboard rides on each head, in that head's local units.
@@ -1151,34 +1519,72 @@ const EYE_COLORS = {
  * @param {string} type   'asura' | 'naga' | 'rakshasa'
  * @param {boolean} boss  Mahishasura variant
  * @param {number} height World height in tiles (models are authored at 100/tile)
+ * @param {number} variant Which baked sculpt to use; defaults to a random one
  * @returns a handle with { root, height, pose(state), setHurt(t), setFade(a), dispose() }
  */
-export function createMonster(type, boss, height) {
-  const rig = rigFor(type, boss);
+export function createMonster(type, boss, height, variant) {
+  const explicit = variant !== undefined;
+  const v = explicit ? variant % VARIANTS : (Math.random() * VARIANTS) | 0;
+  const rig = rigFor(type, boss, v);
   const protos = materialProtos(type);
   const eyeColor = EYE_COLORS[boss ? 'boss' : type];
+  // An explicit variant means a reproducible monster, so the offline capture
+  // tool shoots the same creature every run.
+  const rnd = rng(explicit ? v * 977 + 13 : v * 977 + ((Math.random() * 1e6) | 0));
 
-  // Per-instance materials so one monster can flash or fade alone.
+  // Per-instance materials so one monster can flash or fade alone. Each also
+  // gets its own slight shift in tone and gloss, so a pack does not look like
+  // one model stamped out repeatedly.
+  const tone = 0.82 + rnd() * 0.34;
   const mats = {};
   const skinLike = [];
   for (const key of Object.keys(protos)) {
     const m = protos[key].clone();
+    // clone() drops the shader patch; put it back or the rim silently vanishes.
+    if (m.userData && m.userData.rim !== undefined) applyRim(m);
     if (key === 'eye') m.color.setHex(eyeColor);
-    if (key === 'ember') m.color.setHex(boss ? 0xff5a10 : type === 'naga' ? 0xc0ff40 : 0xff5a12);
+    else if (key === 'ember') m.color.setHex(boss ? 0xff5a10 : type === 'naga' ? 0xc0ff40 : 0xff5a12);
+    else {
+      m.color.multiplyScalar(tone);
+      m.shininess *= 0.75 + rnd() * 0.5;
+    }
     mats[key] = m;
     if (key !== 'eye' && key !== 'ember') skinLike.push(m);
   }
 
+  // What each material wants when the monster is not fading, so setFade can
+  // put it back instead of forcing everything opaque.
+  const baseTransparent = {};
+  const baseOpacity = {};
+  for (const key of Object.keys(mats)) {
+    baseTransparent[key] = mats[key].transparent;
+    baseOpacity[key] = mats[key].opacity;
+  }
+
   const root = new THREE.Group();
   const groups = new Map();
+  const restM = new THREE.Matrix4();
   for (const node of rig.nodes) {
     const g = new THREE.Group();
     g.position.set(node.at[0], node.at[1], node.at[2]);
     if (node.scale !== 1) g.scale.setScalar(node.scale);
     g.userData.rest = g.position.clone();
+    // The lopsidedness lives on the meshes, below the animated group, so the
+    // per-frame poser overwrites rotations without flattening it back out.
+    const rest = node.rest;
+    if (rest) {
+      restM.compose(
+        new THREE.Vector3(rest.p[0], rest.p[1], rest.p[2]),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(rest.r[0], rest.r[1], rest.r[2])),
+        new THREE.Vector3(rest.s, rest.s, rest.s),
+      );
+    }
     for (const [matKey, geo] of node.geos) {
       const mesh = new THREE.Mesh(geo, mats[matKey]);
       mesh.matrixAutoUpdate = false;
+      if (rest) mesh.matrix.copy(restM);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
       g.add(mesh);
     }
     groups.set(node.name, g);
@@ -1203,7 +1609,8 @@ export function createMonster(type, boss, height) {
   const headGroup = groups.get('head');
   headGroup.add(glow);
 
-  const scale = height / rig.authoredHeight;
+  // A little variance in stature on top of everything else.
+  const scale = (height * (0.94 + rnd() * 0.12)) / rig.authoredHeight;
   root.scale.setScalar(scale);
 
   const P = (name) => groups.get(name);
@@ -1253,12 +1660,17 @@ export function createMonster(type, boss, height) {
       if (on !== transparent) {
         transparent = on;
         for (const key of Object.keys(mats)) {
-          mats[key].transparent = on;
-          mats[key].depthWrite = !on;
-          mats[key].needsUpdate = true;
+          const m = mats[key];
+          // Restore each material's own setting rather than forcing opaque:
+          // blood is authored transparent and must stay that way.
+          m.transparent = on || baseTransparent[key];
+          m.depthWrite = !m.transparent;
+          m.needsUpdate = true;
         }
       }
-      if (on) for (const key of Object.keys(mats)) mats[key].opacity = alpha;
+      for (const key of Object.keys(mats)) {
+        mats[key].opacity = on ? alpha : baseOpacity[key];
+      }
       glowMat.opacity = alpha;
     },
 
